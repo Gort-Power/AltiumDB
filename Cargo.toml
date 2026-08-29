@@ -1,0 +1,21 @@
+[package]
+name = "AltiumDB"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+calamine = "0.36.1"
+resvg = "0.44"
+usvg = "0.44"
+tiny-skia = "0.11"
+cfb = "0.14.0"
+
+[build-dependencies]
+winresource = "0.1"
