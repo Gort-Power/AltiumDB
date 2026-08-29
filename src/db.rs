@@ -332,10 +332,8 @@ pub fn search_all_by_mpn(conn: &Connection, query: &str) -> Result<Vec<(String, 
         let sql = format!("{COMPONENT_SELECT}{safe}] WHERE MPN LIKE ?1 ESCAPE '\\' ORDER BY MPN");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![pattern], component_from_row)?;
-        for r in rows {
-            if let Ok(c) = r {
-                out.push((table.clone(), c));
-            }
+        for c in rows.flatten() {
+            out.push((table.clone(), c));
         }
     }
     Ok(out)

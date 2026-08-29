@@ -41,8 +41,10 @@ fn loaded_fontdb() -> Arc<usvg::fontdb::Database> {
 }
 
 pub fn rasterize_svg(svg: &str, max_w: u32, max_h: u32) -> Result<egui::ColorImage, String> {
-    let mut opt = usvg::Options::default();
-    opt.fontdb = loaded_fontdb();
+    let opt = usvg::Options::<'_> {
+        fontdb: loaded_fontdb(),
+        ..Default::default()
+    };
     let tree = usvg::Tree::from_str(svg, &opt).map_err(|e| e.to_string())?;
     let size = tree.size();
     let sw = size.width();

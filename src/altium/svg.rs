@@ -306,7 +306,7 @@ const PCB_BODY_STROKE: &str = "#2E8B57";
 /// (paste, solder mask, mechanical, drill, …) is skipped. `courtyard`
 /// holds the per-library courtyard layer ids (which vary between libraries).
 fn pcb_render_layer(layer: u8, courtyard: &[u8]) -> bool {
-    layer >= pcblib::LAYER_TOP && layer <= pcblib::LAYER_BOTTOM
+    (pcblib::LAYER_TOP..=pcblib::LAYER_BOTTOM).contains(&layer)
         || layer == pcblib::LAYER_TOP_OVERLAY
         || layer == pcblib::LAYER_BOTTOM_OVERLAY
         || layer == pcblib::LAYER_TOP_COURTYARD
@@ -478,8 +478,8 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                         });
                     } else if pts.len() == 2 {
                         ops.push(Op::Line {
-                            p1: pts[0].clone(),
-                            p2: pts[1].clone(),
+                            p1: pts[0],
+                            p2: pts[1],
                             width: 1.0,
                             color,
                         });
@@ -890,7 +890,7 @@ fn draw_sch_prim(
         } => {
             b.add_circle(center.x, center.y, radius_x.max(*radius_y));
             ops.push(Op::Ellipse {
-                center: center.clone(),
+                center: *center,
                 rx: *radius_x,
                 ry: *radius_y,
                 stroke: rgb(*color),
@@ -910,7 +910,7 @@ fn draw_sch_prim(
         } => {
             b.add_circle(center.x, center.y, radius_x.max(*radius_y));
             // Flatten the pie outline.
-            let mut pts = vec![center.clone()];
+            let mut pts = vec![*center];
             let steps = (((end_angle - start_angle).abs() / 10.0).ceil() as usize).clamp(2, 72);
             for i in 0..=steps {
                 let a = (*start_angle + (*end_angle - *start_angle) * i as f64 / steps as f64)
@@ -944,8 +944,8 @@ fn draw_sch_prim(
             // Zero-width/height rects are not rendered by SVG; emit a line.
             if w < 0.01 || h < 0.01 {
                 ops.push(Op::Line {
-                    p1: p1.clone(),
-                    p2: p2.clone(),
+                    p1: *p1,
+                    p2: *p2,
                     width: 10.0,
                     color: rgb(*color),
                 });
@@ -1004,7 +1004,7 @@ fn draw_sch_prim(
             let r = PIN_TEXT_SIZE * 0.45;
             b.add_circle(pos.x, pos.y, r);
             ops.push(Op::Ellipse {
-                center: pos.clone(),
+                center: *pos,
                 rx: r,
                 ry: r,
                 stroke: rgb(*color),
@@ -1102,7 +1102,7 @@ fn draw_sch_prim(
                 _ => 0.0,
             };
             ops.push(Op::Text {
-                pos: pos.clone(),
+                pos: *pos,
                 size,
                 color: rgb(*color),
                 anchor: "middle",
@@ -1123,24 +1123,24 @@ fn sample_bezier(points: &[Point]) -> Vec<Point> {
         return points.to_vec();
     }
     let mut idx = 0usize;
-    let mut prev = points[0].clone();
-    out.push(prev.clone());
+    let mut prev = points[0];
+    out.push(prev);
     while idx + 3 < points.len() + 1 && idx + 2 < points.len() {
-        let p0 = prev.clone();
-        let c1 = points[idx].clone();
+        let p0 = prev;
+        let c1 = points[idx];
         let c2 = points
             .get(idx + 1)
             .cloned()
-            .unwrap_or_else(|| points.last().unwrap().clone());
+            .unwrap_or_else(|| *points.last().unwrap());
         let p3 = points
             .get(idx + 2)
             .cloned()
-            .unwrap_or_else(|| points.last().unwrap().clone());
+            .unwrap_or_else(|| *points.last().unwrap());
         for k in 1..=12 {
             let t = k as f64 / 12.0;
             out.push(bezier_point(&p0, &c1, &c2, &p3, t));
         }
-        prev = p3.clone();
+        prev = p3;
         idx += 3;
     }
     out

@@ -193,11 +193,9 @@ fn relative_library_path(folder: &str, file: &str) -> String {
     let folder = folder.trim();
     let file = file.trim();
     let full = std::path::Path::new(file);
-    if !folder.is_empty() {
-        if full.strip_prefix(folder).is_ok() {
-            if let Some(name) = full.file_name() {
-                return name.to_string_lossy().to_string();
-            }
+    if !folder.is_empty() && full.strip_prefix(folder).is_ok() {
+        if let Some(name) = full.file_name() {
+            return name.to_string_lossy().to_string();
         }
     }
     file.to_string()

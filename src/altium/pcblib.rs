@@ -482,7 +482,7 @@ fn parse_pad(r: &mut Reader) -> Option<Prim> {
         let top_shape = fix(alt_top.unwrap_or(top_shape_raw));
         let bot_shape = fix(alt_bot.unwrap_or(bot_shape_raw));
 
-        return Some(Prim::Pad(Pad {
+        Some(Prim::Pad(Pad {
             designator,
             layer,
             x,
@@ -498,7 +498,7 @@ fn parse_pad(r: &mut Reader) -> Option<Prim> {
             hole_shape,
             slot_size,
             slot_rotation,
-        }));
+        }))
     }
 }
 
@@ -721,8 +721,7 @@ fn leftover_after(
             probe.bytes(16)?;
         }
     }
-    loop {
-        let Some(hn) = probe.peek_u32() else { break };
+    while let Some(hn) = probe.peek_u32() {
         let hn = hn as usize;
         if probe.remaining() < 4 + hn * 16 {
             break;

@@ -206,20 +206,18 @@ pub fn open(path: &Path) -> Result<SchLib, String> {
 /// Extract `SizeN` point sizes from the FileHeader stream.
 fn parse_font_sizes(data: &[u8]) -> Vec<f64> {
     let mut sizes = Vec::new();
-    for rec in parse_stream_records(data) {
-        if let StreamRecord::Text(pairs) = rec {
-            for (k, v) in pairs {
-                if let Some(idx) = k.strip_prefix("Size").and_then(|s| s.parse::<usize>().ok()) {
-                    if let Ok(pt) = v.trim().parse::<f64>() {
-                        if sizes.len() <= idx {
-                            sizes.resize(idx + 1, 10.0);
-                        }
-                        sizes[idx] = pt;
+    if let Some(StreamRecord::Text(pairs)) = parse_stream_records(data).into_iter().next() {
+        for (k, v) in pairs {
+            if let Some(idx) = k.strip_prefix("Size").and_then(|s| s.parse::<usize>().ok()) {
+                if let Ok(pt) = v.trim().parse::<f64>() {
+                    if sizes.len() <= idx {
+                        sizes.resize(idx + 1, 10.0);
                     }
+                    sizes[idx] = pt;
                 }
             }
         }
-        break; // Only the first (header) record carries the font table.
+        // Only the first (header) record carries the font table.
     }
     sizes
 }

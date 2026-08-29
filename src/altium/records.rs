@@ -152,7 +152,7 @@ impl StreamRecord {
     }
 
     pub fn prop_i64(&self, key: &str) -> Option<i64> {
-        self.prop(key).and_then(|v| parse_int(v))
+        self.prop(key).and_then(parse_int)
     }
 
     pub fn prop_f64(&self, key: &str) -> Option<f64> {

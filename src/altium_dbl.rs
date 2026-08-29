@@ -217,8 +217,7 @@ impl AltiumDbl {
             s.push_str(&format!("{}={}\n", key, value));
         }
 
-        let mut i = 1usize;
-        for lib in &self.libraries {
+        for (i, lib) in (1usize..).zip(self.libraries.iter()) {
             s.push_str(&format!("[Table{}]\n", i));
             s.push_str("SchemaName=\n");
             s.push_str(&format!("TableName={}\n", lib.table));
@@ -231,7 +230,6 @@ impl AltiumDbl {
                 if lib.user_where { "1" } else { "0" }
             ));
             s.push_str(&format!("UserWhereText={}\n", lib.user_where_text));
-            i += 1;
         }
 
         let mut fm = 1usize;
