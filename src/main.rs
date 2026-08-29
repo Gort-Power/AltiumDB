@@ -11,6 +11,7 @@ mod altium_dbl;
 mod app;
 mod db;
 mod render;
+mod update;
 
 #[derive(Deserialize)]
 struct ConfigData {

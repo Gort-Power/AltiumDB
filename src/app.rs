@@ -149,6 +149,10 @@ pub struct AltiumDbApp {
     search_params: Vec<SearchParam>,
     search_results: Vec<(String, db::Component)>,
     search_selected: Option<String>,
+
+    update_checker: crate::update::SharedRelease,
+    new_release: Option<crate::update::ReleaseInfo>,
+    update_dismissed: bool,
 }
 
 fn unique_name(base: &str, exists: impl Fn(&str) -> bool) -> String {
@@ -417,6 +421,9 @@ impl AltiumDbApp {
             search_params: Vec::new(),
             search_results: Vec::new(),
             search_selected: None,
+            update_checker: crate::update::spawn_check(),
+            new_release: None,
+            update_dismissed: false,
         };
         app.sync_dbl_fields_with_db();
         app.sync_libraries_with_db();
@@ -1036,6 +1043,14 @@ impl eframe::App for AltiumDbApp {
         self.apply_theme(ctx);
         self.adapt_viewport(ctx);
 
+        if self.new_release.is_none() && !self.update_dismissed {
+            if let Ok(guard) = self.update_checker.lock() {
+                if guard.is_some() {
+                    self.new_release = guard.clone();
+                }
+            }
+        }
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -1204,6 +1219,13 @@ impl eframe::App for AltiumDbApp {
                 ui.label("Manage component database, browse symbols,");
                 ui.label("footprints and edit addition fields.");
                 ui.separator();
+                ui.label(format!("Version: {}", crate::update::current_version()));
+                if ui.button("Check for updates").clicked() {
+                    self.update_checker = crate::update::spawn_check();
+                    self.update_dismissed = false;
+                    self.set_status("Checking for updates...");
+                }
+                ui.separator();
                 ui.label(format!("Author: {}", "Selyutin Anton aka YOUASSBEE"));
                 ui.label(format!("E-mail: {}", "selutin.anton@yandex.ru"));
                 ui.label(format!("Telegram: {}", "@YOUASSBEE"));
@@ -1217,6 +1239,45 @@ impl eframe::App for AltiumDbApp {
             });
             if modal.should_close() {
                 self.about_open = false;
+            }
+        }
+
+        if let Some(release) = self.new_release.clone() {
+            let mut open = true;
+            egui::Window::new("Update available")
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "A new version {} is available (you are running {}).",
+                        release.version,
+                        crate::update::current_version()
+                    ));
+                    if !release.name.is_empty() && release.name != release.version {
+                        ui.label(format!("Release: {}", release.name));
+                    }
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Open release page").clicked() {
+                            ui.ctx().open_url(egui::OpenUrl {
+                                url: release.url.clone(),
+                                new_tab: true,
+                            });
+                            self.new_release = None;
+                        }
+                        if ui.button("Remind me later").clicked() {
+                            self.new_release = None;
+                        }
+                        if ui.button("Skip this version").clicked() {
+                            self.update_dismissed = true;
+                            self.new_release = None;
+                        }
+                    });
+                });
+            if !open {
+                self.new_release = None;
             }
         }
 
@@ -2735,3 +2796,4 @@ mod tests {
         );
     }
 }
+
