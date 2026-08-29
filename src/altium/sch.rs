@@ -112,15 +112,9 @@ pub enum SchPrimKind {
         color: u32,
     },
     /// RECORD=3: IEEE symbol marker drawn at a location.
-    IeeeMarker {
-        pos: Point,
-        color: u32,
-    },
+    IeeeMarker { pos: Point, color: u32 },
     /// RECORD=30: embedded image; rendered as a placeholder frame.
-    Image {
-        p1: Point,
-        p2: Point,
-    },
+    Image { p1: Point, p2: Point },
     Bezier {
         points: Vec<Point>,
         width: u8,
@@ -203,7 +197,10 @@ pub fn open(path: &Path) -> Result<SchLib, String> {
             symbols.push(sym);
         }
     }
-    Ok(SchLib { symbols, font_sizes })
+    Ok(SchLib {
+        symbols,
+        font_sizes,
+    })
 }
 
 /// Extract `SizeN` point sizes from the FileHeader stream.
@@ -284,7 +281,10 @@ pub fn parse_symbol(name: &str, data: &[u8]) -> Option<Symbol> {
                     }
                     4 => {
                         if let Some(kind) = parse_label(rec) {
-                            sym.prims.push(SchPrim { owner_part: rec.prop_i64("OWNERPARTID").unwrap_or(-1), kind });
+                            sym.prims.push(SchPrim {
+                                owner_part: rec.prop_i64("OWNERPARTID").unwrap_or(-1),
+                                kind,
+                            });
                         }
                     }
                     _ => {}
@@ -433,7 +433,7 @@ fn parse_graphic(rec: &StreamRecord, rt: i64) -> Option<SchPrimKind> {
             let center = rec_xy(rec, "LOCATION")?;
             Some(SchPrimKind::EllipticalArc {
                 center,
-                 radius_x: mils(rec.prop_f64("RADIUS")?),
+                radius_x: mils(rec.prop_f64("RADIUS")?),
                 radius_y: mils(rec.prop_f64("SECONDARYRADIUS")?),
                 start_angle: rec.prop_f64("STARTANGLE").unwrap_or(0.0),
                 end_angle: rec.prop_f64("ENDANGLE").unwrap_or(360.0),
@@ -446,7 +446,10 @@ fn parse_graphic(rec: &StreamRecord, rt: i64) -> Option<SchPrimKind> {
         // store only `ENDANGLE` and rely on Altium's implicit STARTANGLE of 0.
         12 => {
             let center = rec_xy(rec, "LOCATION")?;
-            let radius = mils(rec.prop_f64("RADIUS").or_else(|| rec.prop_f64("SECONDARYRADIUS"))?);
+            let radius = mils(
+                rec.prop_f64("RADIUS")
+                    .or_else(|| rec.prop_f64("SECONDARYRADIUS"))?,
+            );
             Some(SchPrimKind::Arc {
                 center,
                 radius,
@@ -471,7 +474,10 @@ fn parse_graphic(rec: &StreamRecord, rt: i64) -> Option<SchPrimKind> {
             let h = mils(rec.prop_f64("HEIGHT")?);
             Some(SchPrimKind::Image {
                 p1,
-                p2: Point { x: p1.x + w, y: p1.y + h },
+                p2: Point {
+                    x: p1.x + w,
+                    y: p1.y + h,
+                },
             })
         }
         // 13: line segment from Location to Corner (zero components omitted).
@@ -538,7 +544,10 @@ fn color_of(rec: &StreamRecord, key: &str) -> Option<u32> {
 }
 
 fn prop_bool(rec: &StreamRecord, key: &str) -> bool {
-    matches!(rec.prop(key).map(|s| s.to_ascii_uppercase()).as_deref(), Some("T") | Some("TRUE"))
+    matches!(
+        rec.prop(key).map(|s| s.to_ascii_uppercase()).as_deref(),
+        Some("T") | Some("TRUE")
+    )
 }
 
 /// Binary PIN blob layout (first byte 0x02).

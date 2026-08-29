@@ -54,11 +54,26 @@ fn base_fields() -> Vec<Field> {
         Field::new("Footprint Path 2", "[Footprint Path 2]", false, false),
         Field::new("Footprint Ref 3", "[Footprint Ref 3]", false, false),
         Field::new("Footprint Path 3", "[Footprint Path 3]", false, false),
-        Field::new("ComponentLink1Description", "ComponentLink1Description", false, false),
+        Field::new(
+            "ComponentLink1Description",
+            "ComponentLink1Description",
+            false,
+            false,
+        ),
         Field::new("ComponentLink1URL", "ComponentLink1URL", false, false),
-        Field::new("ComponentLink2Description", "ComponentLink2Description", false, false),
+        Field::new(
+            "ComponentLink2Description",
+            "ComponentLink2Description",
+            false,
+            false,
+        ),
         Field::new("ComponentLink2URL", "ComponentLink2URL", false, false),
-        Field::new("ComponentLink3Description", "ComponentLink3Description", false, false),
+        Field::new(
+            "ComponentLink3Description",
+            "ComponentLink3Description",
+            false,
+            false,
+        ),
         Field::new("ComponentLink3URL", "ComponentLink3URL", false, false),
         Field::new("Description", "[Description]", false, false),
         Field::new("Verified", "Verified", false, false),
@@ -66,7 +81,10 @@ fn base_fields() -> Vec<Field> {
 }
 
 fn connection_string_for(dsn: &str) -> String {
-    format!("Provider=MSDASQL.1;Persist Security Info=False;Data Source={}", dsn)
+    format!(
+        "Provider=MSDASQL.1;Persist Security Info=False;Data Source={}",
+        dsn
+    )
 }
 
 fn default_dsn(db_path: &Path) -> String {
@@ -78,7 +96,10 @@ fn default_dsn(db_path: &Path) -> String {
 
 fn default_database_links(connection_string: &str) -> Vec<(String, String)> {
     vec![
-        ("ConnectionString".to_string(), connection_string.to_string()),
+        (
+            "ConnectionString".to_string(),
+            connection_string.to_string(),
+        ),
         ("AddMode".to_string(), "3".to_string()),
         ("RemoveMode".to_string(), "1".to_string()),
         ("UpdateMode".to_string(), "2".to_string()),
@@ -143,7 +164,8 @@ impl AltiumDbl {
         if let Some(entry) = self.database_links.iter_mut().find(|(k, _)| k == key) {
             entry.1 = value.to_string();
         } else {
-            self.database_links.push((key.to_string(), value.to_string()));
+            self.database_links
+                .push((key.to_string(), value.to_string()));
         }
     }
 
@@ -187,7 +209,11 @@ impl AltiumDbl {
         s.push_str("Version=1.1\n");
         s.push_str("[DatabaseLinks]\n");
         for (key, value) in &self.database_links {
-            let value = if key == "ConnectionString" { &self.connection_string } else { value };
+            let value = if key == "ConnectionString" {
+                &self.connection_string
+            } else {
+                value
+            };
             s.push_str(&format!("{}={}\n", key, value));
         }
 
@@ -196,8 +222,14 @@ impl AltiumDbl {
             s.push_str(&format!("[Table{}]\n", i));
             s.push_str("SchemaName=\n");
             s.push_str(&format!("TableName={}\n", lib.table));
-            s.push_str(&format!("Enabled={}\n", if lib.enabled { "True" } else { "False" }));
-            s.push_str(&format!("UserWhere={}\n", if lib.user_where { "1" } else { "0" }));
+            s.push_str(&format!(
+                "Enabled={}\n",
+                if lib.enabled { "True" } else { "False" }
+            ));
+            s.push_str(&format!(
+                "UserWhere={}\n",
+                if lib.user_where { "1" } else { "0" }
+            ));
             s.push_str(&format!("UserWhereText={}\n", lib.user_where_text));
             i += 1;
         }
@@ -353,13 +385,31 @@ mod tests {
         let parsed = AltiumDbl::from_ini(&ini).unwrap();
         assert_eq!(parsed.libraries.len(), 1);
         assert_eq!(parsed.libraries[0].table, "Resistors");
-        assert_eq!(parsed.libraries[0].fields.len(), dbl.libraries[0].fields.len());
-        assert!(parsed.libraries[0].fields.iter().any(|f| f.is_key && f.column == "MPN"));
-        assert!(parsed.libraries[0].fields.iter().any(|f| f.column == "Library Path" && f.parameter == "[Library Path]"));
-        assert!(parsed.libraries[0].fields.iter().any(|f| f.column == "Footprint Path" && f.parameter == "[Footprint Path]"));
+        assert_eq!(
+            parsed.libraries[0].fields.len(),
+            dbl.libraries[0].fields.len()
+        );
+        assert!(parsed.libraries[0]
+            .fields
+            .iter()
+            .any(|f| f.is_key && f.column == "MPN"));
+        assert!(parsed.libraries[0]
+            .fields
+            .iter()
+            .any(|f| f.column == "Library Path" && f.parameter == "[Library Path]"));
+        assert!(parsed.libraries[0]
+            .fields
+            .iter()
+            .any(|f| f.column == "Footprint Path" && f.parameter == "[Footprint Path]"));
         assert!(parsed.libraries[0].enabled);
-        assert!(parsed.database_links.iter().any(|(k, v)| k == "ConnectionString" && v.contains("Data Source=test")));
-        assert!(parsed.database_links.iter().any(|(k, v)| k == "AddMode" && v == "3"));
+        assert!(parsed
+            .database_links
+            .iter()
+            .any(|(k, v)| k == "ConnectionString" && v.contains("Data Source=test")));
+        assert!(parsed
+            .database_links
+            .iter()
+            .any(|(k, v)| k == "AddMode" && v == "3"));
     }
 
     #[test]
@@ -406,7 +456,10 @@ mod tests {
         assert!(!parsed.libraries[0].enabled);
         assert!(parsed.libraries[0].user_where);
         assert_eq!(parsed.libraries[0].user_where_text, "[MPN] = 'R1'");
-        assert!(parsed.database_links.iter().any(|(k, v)| k == "LibrarySearchPath" && v.contains("symbols")));
+        assert!(parsed
+            .database_links
+            .iter()
+            .any(|(k, v)| k == "LibrarySearchPath" && v.contains("symbols")));
 
         let mut dbl = parsed;
         dbl.set_dsn("gortpower");

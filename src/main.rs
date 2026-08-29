@@ -164,7 +164,12 @@ fn main() -> eframe::Result<()> {
             let (db_path, dbl_path, config_path) = resolve_paths();
             let conn = db::open_database(&db_path).expect("Failed to open database");
             db::migrate(&conn).expect("Failed to migrate database");
-            Ok(Box::new(app::AltiumDbApp::new(conn, db_path, dbl_path, config_path)))
+            Ok(Box::new(app::AltiumDbApp::new(
+                conn,
+                db_path,
+                dbl_path,
+                config_path,
+            )))
         }),
     )
 }

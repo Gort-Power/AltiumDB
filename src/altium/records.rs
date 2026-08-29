@@ -70,7 +70,9 @@ impl<'a> Reader<'a> {
 
     pub fn f64(&mut self) -> Option<f64> {
         let b = self.bytes(8)?;
-        Some(f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        Some(f64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
 
     pub fn bytes(&mut self, n: usize) -> Option<&'a [u8]> {

@@ -168,7 +168,10 @@ fn unique_name(base: &str, exists: impl Fn(&str) -> bool) -> String {
 fn button_width(ui: &egui::Ui, text: &str) -> f32 {
     let pad = ui.spacing().button_padding.x * 2.0;
     let font = egui::FontId::proportional(ui.text_style_height(&egui::TextStyle::Button));
-    let text_w: f32 = text.chars().map(|c| ui.fonts(|f| f.glyph_width(&font, c))).sum();
+    let text_w: f32 = text
+        .chars()
+        .map(|c| ui.fonts(|f| f.glyph_width(&font, c)))
+        .sum();
     text_w + pad + 2.0
 }
 
@@ -301,16 +304,18 @@ fn draw_texture_fitted(ui: &egui::Ui, canvas_rect: egui::Rect, tex: &egui::Textu
     );
 }
 
-const UPDATE_MODES: [(u8, &str); 3] =
-    [(0, "Default"), (1, "Do not update"), (2, "Update")];
+const UPDATE_MODES: [(u8, &str); 3] = [(0, "Default"), (1, "Do not update"), (2, "Update")];
 const ADD_MODES: [(u8, &str); 4] = [
     (0, "Default"),
     (1, "Do not add"),
     (2, "Add"),
     (3, "Add only if not blank in database"),
 ];
-const REMOVE_MODES: [(u8, &str); 3] =
-    [(0, "Default"), (1, "Do not remove"), (2, "Remove only if blank in database")];
+const REMOVE_MODES: [(u8, &str); 3] = [
+    (0, "Default"),
+    (1, "Do not remove"),
+    (2, "Remove only if blank in database"),
+];
 
 fn mode_label(modes: &[(u8, &'static str)], v: u8) -> &'static str {
     modes
@@ -321,7 +326,12 @@ fn mode_label(modes: &[(u8, &'static str)], v: u8) -> &'static str {
 }
 
 impl AltiumDbApp {
-    pub fn new(conn: Connection, db_path: PathBuf, dbl_path: PathBuf, config_path: PathBuf) -> Self {
+    pub fn new(
+        conn: Connection,
+        db_path: PathBuf,
+        dbl_path: PathBuf,
+        config_path: PathBuf,
+    ) -> Self {
         let cfg = Self::load_config_data(&config_path);
         let config_dsn = cfg.dsn;
         let theme = cfg.theme;
@@ -418,12 +428,15 @@ impl AltiumDbApp {
     }
 
     fn refresh_categories(&mut self) {
-        self.categories = self.dbl.libraries.iter().map(|lib| {
-            CategoryInfo {
+        self.categories = self
+            .dbl
+            .libraries
+            .iter()
+            .map(|lib| CategoryInfo {
                 name: lib.name.clone(),
                 fields: lib.fields.clone(),
-            }
-        }).collect();
+            })
+            .collect();
     }
 
     fn refresh_components(&mut self) {
@@ -443,7 +456,9 @@ impl AltiumDbApp {
 
     fn refresh_custom_values(&mut self) {
         self.custom_values.clear();
-        if let (Some(ref cat), Some(comp_id)) = (&self.selected_category, self.selected_component_id.clone()) {
+        if let (Some(ref cat), Some(comp_id)) =
+            (&self.selected_category, self.selected_component_id.clone())
+        {
             for col in &self.custom_columns {
                 let val = db::get_custom_value(&self.conn, cat, &comp_id, col).unwrap_or_default();
                 self.custom_values.push((col.clone(), val));
@@ -457,7 +472,9 @@ impl AltiumDbApp {
         cols.into_iter()
             .filter(|c| !excluded.contains(&c.as_str()))
             .map(|c| {
-                let name = self.dbl.find_library(cat)
+                let name = self
+                    .dbl
+                    .find_library(cat)
                     .and_then(|l| l.fields.iter().find(|f| f.column == c))
                     .map(|f| f.column.clone())
                     .unwrap_or_else(|| c.clone());
@@ -467,7 +484,8 @@ impl AltiumDbApp {
     }
 
     fn selected_search_filters(&self) -> Vec<(String, Vec<String>)> {
-        self.search_params.iter()
+        self.search_params
+            .iter()
             .filter(|p| !p.selected.is_empty())
             .map(|p| (p.column.clone(), p.selected.clone()))
             .collect()
@@ -475,22 +493,18 @@ impl AltiumDbApp {
 
     fn refresh_search(&mut self) {
         if let Some(ref cat) = self.search_category {
-            self.search_results = db::search_components(
-                &self.conn,
-                cat,
-                &self.selected_search_filters(),
-            )
-            .unwrap_or_default()
-            .into_iter()
-            .map(|c| (cat.clone(), c))
-            .collect();
+            self.search_results =
+                db::search_components(&self.conn, cat, &self.selected_search_filters())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|c| (cat.clone(), c))
+                    .collect();
         } else if self.search_all {
             let q = self.search_all_query.trim();
             if q.is_empty() {
                 self.search_results.clear();
             } else {
-                self.search_results =
-                    db::search_all_by_mpn(&self.conn, q).unwrap_or_default();
+                self.search_results = db::search_all_by_mpn(&self.conn, q).unwrap_or_default();
             }
         } else {
             self.search_results.clear();
@@ -505,7 +519,8 @@ impl AltiumDbApp {
             return;
         }
         if let Some(ref cat) = self.search_category {
-            self.search_params = self.search_param_columns(cat)
+            self.search_params = self
+                .search_param_columns(cat)
                 .into_iter()
                 .map(|(column, name)| SearchParam {
                     values: db::get_distinct_values(&self.conn, cat, &column).unwrap_or_default(),
@@ -522,13 +537,22 @@ impl AltiumDbApp {
 
     fn search_detail_value(&self, cat: &str, comp: &db::Component, column: &str) -> String {
         let base = [
-            "Manufacturer", "Library Ref", "Library Path",
-            "Footprint Ref", "Footprint Path",
-            "Footprint Ref 2", "Footprint Path 2",
-            "Footprint Ref 3", "Footprint Path 3",
-            "Description", "ComponentLink1Description", "ComponentLink1URL",
-            "ComponentLink2Description", "ComponentLink2URL",
-            "ComponentLink3Description", "ComponentLink3URL",
+            "Manufacturer",
+            "Library Ref",
+            "Library Path",
+            "Footprint Ref",
+            "Footprint Path",
+            "Footprint Ref 2",
+            "Footprint Path 2",
+            "Footprint Ref 3",
+            "Footprint Path 3",
+            "Description",
+            "ComponentLink1Description",
+            "ComponentLink1URL",
+            "ComponentLink2Description",
+            "ComponentLink2URL",
+            "ComponentLink3Description",
+            "ComponentLink3URL",
         ];
         if base.contains(&column) {
             match column {
@@ -662,7 +686,8 @@ impl AltiumDbApp {
         let mut skipped_no_id = 0usize;
 
         for row in rows {
-            let mut values: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            let mut values: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             for (i, h) in headers.iter().enumerate() {
                 let header = h.trim().to_string();
                 if header.is_empty() {
@@ -676,12 +701,18 @@ impl AltiumDbApp {
                 }
             }
 
-            let item_id = values.get("MPN").map(|v| v.trim().to_string()).unwrap_or_default();
+            let item_id = values
+                .get("MPN")
+                .map(|v| v.trim().to_string())
+                .unwrap_or_default();
             if item_id.is_empty() {
                 skipped_no_id += 1;
                 continue;
             }
-            let category = values.get("Category").map(|v| v.trim().to_string()).unwrap_or_default();
+            let category = values
+                .get("Category")
+                .map(|v| v.trim().to_string())
+                .unwrap_or_default();
             if category.is_empty() || !db::table_exists(&self.conn, &category).unwrap_or(false) {
                 skipped_no_table += 1;
                 continue;
@@ -729,13 +760,17 @@ impl AltiumDbApp {
     }
 
     fn save_dbl(&mut self) {
-        let search_path = [self.settings_symbols_folder.trim(), self.settings_footprints_folder.trim()]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(";");
-        self.dbl.set_database_link("LibrarySearchPath", &search_path);
+        let search_path = [
+            self.settings_symbols_folder.trim(),
+            self.settings_footprints_folder.trim(),
+        ]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(";");
+        self.dbl
+            .set_database_link("LibrarySearchPath", &search_path);
         if let Err(e) = self.dbl.save(&self.dbl_path) {
             self.set_status_err(e);
         }
@@ -773,7 +808,11 @@ impl AltiumDbApp {
 
     /// Preview background color matching the current theme.
     fn preview_bg(&self, ctx: &egui::Context) -> &'static str {
-        if self.is_dark(ctx) { DARK_BG } else { LIGHT_BG }
+        if self.is_dark(ctx) {
+            DARK_BG
+        } else {
+            LIGHT_BG
+        }
     }
 
     fn adapt_viewport(&mut self, ctx: &egui::Context) {
@@ -784,7 +823,9 @@ impl AltiumDbApp {
         if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
             let min_w = monitor.x.min(700.0);
             let min_h = monitor.y.min(520.0);
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(min_w, min_h)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+                min_w, min_h,
+            )));
             let w = 1200.0f32.min(monitor.x * 0.9);
             let h = 700.0f32.min(monitor.y * 0.9);
             if w < 1200.0 || h < 700.0 {
@@ -800,7 +841,10 @@ impl AltiumDbApp {
         let screen = ctx.screen_rect();
         egui::vec2(
             ideal.x.min(screen.width() * 0.92).max(screen.width() * 0.4),
-            ideal.y.min(screen.height() * 0.85).max(screen.height() * 0.4),
+            ideal
+                .y
+                .min(screen.height() * 0.85)
+                .max(screen.height() * 0.4),
         )
     }
 
@@ -858,7 +902,11 @@ impl AltiumDbApp {
 
     fn refresh_browse_entries(&mut self) {
         self.browse_entries.clear();
-        let ext = if self.browse_target.is_symbols() { "schlib" } else { "pcblib" };
+        let ext = if self.browse_target.is_symbols() {
+            "schlib"
+        } else {
+            "pcblib"
+        };
         if let Ok(entries) = std::fs::read_dir(&self.browse_path) {
             for entry in entries.flatten() {
                 let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -925,7 +973,8 @@ impl AltiumDbApp {
         let stem = Self::browse_file_stem(&name);
         if self.browse_target.is_symbols() {
             self.library_ref_input = stem;
-            self.library_path_input = relative_library_path(&self.settings_symbols_folder, &full_str);
+            self.library_path_input =
+                relative_library_path(&self.settings_symbols_folder, &full_str);
         } else {
             let rel = relative_library_path(&self.settings_footprints_folder, &full_str);
             match self.browse_target {
@@ -947,7 +996,14 @@ impl AltiumDbApp {
         self.set_status_ok();
     }
 
-    fn render_and_show(&mut self, ctx: &egui::Context, folder: String, rel: String, is_symbol: bool, name: &str) {
+    fn render_and_show(
+        &mut self,
+        ctx: &egui::Context,
+        folder: String,
+        rel: String,
+        is_symbol: bool,
+        name: &str,
+    ) {
         let lib = resolve_library_path(folder.trim(), rel.trim());
         if lib.is_empty() {
             self.set_status("Library Path is empty. Browse for a library first");
@@ -1000,7 +1056,9 @@ impl eframe::App for AltiumDbApp {
                             .save_file()
                         {
                             match self.dbl.save(&path) {
-                                Ok(()) => self.set_status(format!("Exported to {}", path.display())),
+                                Ok(()) => {
+                                    self.set_status(format!("Exported to {}", path.display()))
+                                }
                                 Err(e) => self.set_status_err(e),
                             }
                         }
@@ -1036,104 +1094,104 @@ impl eframe::App for AltiumDbApp {
             let modal = egui::Modal::new(egui::Id::new("settings_modal")).show(ctx, |ui| {
                 ui.set_min_width(self.modal_size(ctx, egui::vec2(460.0, 300.0)).x);
                 ui.heading("Settings");
-                    ui.horizontal(|ui| {
-                        ui.radio_value(&mut self.theme, Theme::System, "System");
-                        ui.radio_value(&mut self.theme, Theme::Light, "Light");
-                        ui.radio_value(&mut self.theme, Theme::Dark, "Dark");
-                    });
-
-                    ui.separator();
-                    ui.heading("Paths");
-
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Database (.sqlite):");
-                        if ui.button("Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter("SQLite Database", &["sqlite"])
-                                .pick_file()
-                            {
-                                self.settings_db_path = path.display().to_string();
-                            }
-                        }
-                        let w = stretch_width(ui, row, 0.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings_db_path)
-                                .hint_text("Path to .sqlite file")
-                                .desired_width(w),
-                        );
-                    });
-
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(".DbLib:");
-                        if ui.button("Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter("Altium Database Library", &["DbLib"])
-                                .pick_file()
-                            {
-                                self.settings_dbl_path = path.display().to_string();
-                            }
-                        }
-                        let w = stretch_width(ui, row, 0.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings_dbl_path)
-                                .hint_text("Path to .DbLib file")
-                                .desired_width(w),
-                        );
-                    });
-
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ODBC Data Source:");
-                        let w = stretch_width(ui, row, 0.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings_dsn)
-                                .hint_text("ODBC DSN name (e.g. gortpower)")
-                                .desired_width(w),
-                        );
-                    });
-
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Symbols folder:");
-                        if ui.button("Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.settings_symbols_folder = path.display().to_string();
-                            }
-                        }
-                        let w = stretch_width(ui, row, 0.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings_symbols_folder)
-                                .hint_text("Base folder for symbols (.SchLib)")
-                                .desired_width(w),
-                        );
-                    });
-
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprints folder:");
-                        if ui.button("Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.settings_footprints_folder = path.display().to_string();
-                            }
-                        }
-                        let w = stretch_width(ui, row, 0.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings_footprints_folder)
-                                .hint_text("Base folder for footprints (.PcbLib)")
-                                .desired_width(w),
-                        );
-                    });
-
-                    ui.separator();
-                    if ui.button("Save").clicked() {
-                        save_clicked = true;
-                        self.reopen_database();
-                        self.save_config_data();
-                        self.set_status("Settings saved");
-                    }
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.theme, Theme::System, "System");
+                    ui.radio_value(&mut self.theme, Theme::Light, "Light");
+                    ui.radio_value(&mut self.theme, Theme::Dark, "Dark");
                 });
+
+                ui.separator();
+                ui.heading("Paths");
+
+                let row = (ui.cursor().min.x, ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label("Database (.sqlite):");
+                    if ui.button("Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("SQLite Database", &["sqlite"])
+                            .pick_file()
+                        {
+                            self.settings_db_path = path.display().to_string();
+                        }
+                    }
+                    let w = stretch_width(ui, row, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_db_path)
+                            .hint_text("Path to .sqlite file")
+                            .desired_width(w),
+                    );
+                });
+
+                let row = (ui.cursor().min.x, ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(".DbLib:");
+                    if ui.button("Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Altium Database Library", &["DbLib"])
+                            .pick_file()
+                        {
+                            self.settings_dbl_path = path.display().to_string();
+                        }
+                    }
+                    let w = stretch_width(ui, row, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_dbl_path)
+                            .hint_text("Path to .DbLib file")
+                            .desired_width(w),
+                    );
+                });
+
+                let row = (ui.cursor().min.x, ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label("ODBC Data Source:");
+                    let w = stretch_width(ui, row, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_dsn)
+                            .hint_text("ODBC DSN name (e.g. gortpower)")
+                            .desired_width(w),
+                    );
+                });
+
+                let row = (ui.cursor().min.x, ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label("Symbols folder:");
+                    if ui.button("Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.settings_symbols_folder = path.display().to_string();
+                        }
+                    }
+                    let w = stretch_width(ui, row, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_symbols_folder)
+                            .hint_text("Base folder for symbols (.SchLib)")
+                            .desired_width(w),
+                    );
+                });
+
+                let row = (ui.cursor().min.x, ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label("Footprints folder:");
+                    if ui.button("Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.settings_footprints_folder = path.display().to_string();
+                        }
+                    }
+                    let w = stretch_width(ui, row, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_footprints_folder)
+                            .hint_text("Base folder for footprints (.PcbLib)")
+                            .desired_width(w),
+                    );
+                });
+
+                ui.separator();
+                if ui.button("Save").clicked() {
+                    save_clicked = true;
+                    self.reopen_database();
+                    self.save_config_data();
+                    self.set_status("Settings saved");
+                }
+            });
 
             if save_clicked || modal.should_close() {
                 self.settings_open = false;
@@ -1166,7 +1224,9 @@ impl eframe::App for AltiumDbApp {
 
         // --- Categories panel ---
         let cat_extra = panel_extra_width(ctx);
-        let cat_content = self.categories.iter()
+        let cat_content = self
+            .categories
+            .iter()
             .map(|c| text_width(ctx, &c.name))
             .fold(0.0f32, f32::max);
         let cat_w = (cat_content + cat_extra).clamp(150.0, 300.0);
@@ -1179,68 +1239,74 @@ impl eframe::App for AltiumDbApp {
                 ui.separator();
 
                 if self.mode == AppMode::Fill {
-                let row = (ui.cursor().min.x, ui.available_width());
-                ui.horizontal(|ui| {
-                    let btn_text = if self.editing_category.is_some() { "Save" } else { "+" };
-                    if ui.small_button(btn_text).clicked() {
-                        let name = self.category_input.trim().to_string();
-                        if !name.is_empty() {
-                            if let Some(ref edit_name) = self.editing_category.clone() {
-                                if edit_name != &name {
-                                    db::rename_table(&self.conn, edit_name, &name).ok();
-                                    self.dbl.remove_library(edit_name);
-                                    let mut lib = altium_dbl::create_library(&name);
-                                    lib.name = name.clone();
-                                    lib.table = name.clone();
-                                    self.dbl.add_library(lib);
+                    let row = (ui.cursor().min.x, ui.available_width());
+                    ui.horizontal(|ui| {
+                        let btn_text = if self.editing_category.is_some() {
+                            "Save"
+                        } else {
+                            "+"
+                        };
+                        if ui.small_button(btn_text).clicked() {
+                            let name = self.category_input.trim().to_string();
+                            if !name.is_empty() {
+                                if let Some(ref edit_name) = self.editing_category.clone() {
+                                    if edit_name != &name {
+                                        db::rename_table(&self.conn, edit_name, &name).ok();
+                                        self.dbl.remove_library(edit_name);
+                                        let mut lib = altium_dbl::create_library(&name);
+                                        lib.name = name.clone();
+                                        lib.table = name.clone();
+                                        self.dbl.add_library(lib);
+                                    }
+                                    self.editing_category = None;
+                                } else {
+                                    if !db::table_exists(&self.conn, &name).unwrap_or(false) {
+                                        db::ensure_table(&self.conn, &name).ok();
+                                    }
+                                    if self.dbl.find_library(&name).is_none() {
+                                        self.dbl.add_library(altium_dbl::create_library(&name));
+                                    }
                                 }
-                                self.editing_category = None;
-                            } else {
-                                if !db::table_exists(&self.conn, &name).unwrap_or(false) {
-                                    db::ensure_table(&self.conn, &name).ok();
-                                }
-                                if self.dbl.find_library(&name).is_none() {
-                                    self.dbl.add_library(altium_dbl::create_library(&name));
-                                }
+                                self.category_input.clear();
+                                self.save_dbl();
+                                self.refresh_categories();
+                                self.set_status_ok();
                             }
-                            self.category_input.clear();
-                            self.save_dbl();
-                            self.refresh_categories();
-                            self.set_status_ok();
                         }
-                    }
-                    let w = stretch_width(ui, row, 0.0);
-                    let response = ui.add(egui::TextEdit::singleline(&mut self.category_input).desired_width(w));
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        let name = self.category_input.trim().to_string();
-                        if !name.is_empty() {
-                            if let Some(ref edit_name) = self.editing_category.clone() {
-                                if edit_name != &name {
-                                    db::rename_table(&self.conn, edit_name, &name).ok();
-                                    self.dbl.remove_library(edit_name);
-                                    let mut lib = altium_dbl::create_library(&name);
-                                    lib.name = name.clone();
-                                    lib.table = name.clone();
-                                    self.dbl.add_library(lib);
+                        let w = stretch_width(ui, row, 0.0);
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.category_input).desired_width(w),
+                        );
+                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            let name = self.category_input.trim().to_string();
+                            if !name.is_empty() {
+                                if let Some(ref edit_name) = self.editing_category.clone() {
+                                    if edit_name != &name {
+                                        db::rename_table(&self.conn, edit_name, &name).ok();
+                                        self.dbl.remove_library(edit_name);
+                                        let mut lib = altium_dbl::create_library(&name);
+                                        lib.name = name.clone();
+                                        lib.table = name.clone();
+                                        self.dbl.add_library(lib);
+                                    }
+                                    self.editing_category = None;
+                                } else {
+                                    if !db::table_exists(&self.conn, &name).unwrap_or(false) {
+                                        db::ensure_table(&self.conn, &name).ok();
+                                    }
+                                    if self.dbl.find_library(&name).is_none() {
+                                        self.dbl.add_library(altium_dbl::create_library(&name));
+                                    }
                                 }
-                                self.editing_category = None;
-                            } else {
-                                if !db::table_exists(&self.conn, &name).unwrap_or(false) {
-                                    db::ensure_table(&self.conn, &name).ok();
-                                }
-                                if self.dbl.find_library(&name).is_none() {
-                                    self.dbl.add_library(altium_dbl::create_library(&name));
-                                }
+                                self.category_input.clear();
+                                self.save_dbl();
+                                self.refresh_categories();
+                                self.set_status_ok();
                             }
-                            self.category_input.clear();
-                            self.save_dbl();
-                            self.refresh_categories();
-                            self.set_status_ok();
                         }
-                    }
-                });
+                    });
 
-                ui.separator();
+                    ui.separator();
                 }
 
                 let selected = self.selected_category.clone();
@@ -1264,30 +1330,30 @@ impl eframe::App for AltiumDbApp {
                             }
                         }
                     } else {
-                    for cat in &self.categories {
-                        let is_selected = selected.as_deref() == Some(&cat.name);
-                        let response = ui.selectable_label(is_selected, &cat.name);
-                        if response.clicked() {
-                            to_select = Some(cat.name.clone());
+                        for cat in &self.categories {
+                            let is_selected = selected.as_deref() == Some(&cat.name);
+                            let response = ui.selectable_label(is_selected, &cat.name);
+                            if response.clicked() {
+                                to_select = Some(cat.name.clone());
+                            }
+                            if response.hovered() {
+                                hovered_cat = Some(cat.name.clone());
+                            }
+                            response.context_menu(|ui| {
+                                if ui.button("Edit").clicked() {
+                                    to_edit = Some(cat.name.clone());
+                                    ui.close_menu();
+                                }
+                                if ui.button("Clone").clicked() {
+                                    to_clone_cat = Some(cat.name.clone());
+                                    ui.close_menu();
+                                }
+                                if ui.button("Delete").clicked() {
+                                    to_delete = Some(cat.name.clone());
+                                    ui.close_menu();
+                                }
+                            });
                         }
-                        if response.hovered() {
-                            hovered_cat = Some(cat.name.clone());
-                        }
-                        response.context_menu(|ui| {
-                            if ui.button("Edit").clicked() {
-                                to_edit = Some(cat.name.clone());
-                                ui.close_menu();
-                            }
-                            if ui.button("Clone").clicked() {
-                                to_clone_cat = Some(cat.name.clone());
-                                ui.close_menu();
-                            }
-                            if ui.button("Delete").clicked() {
-                                to_delete = Some(cat.name.clone());
-                                ui.close_menu();
-                            }
-                        });
-                    }
                     }
                 });
 
@@ -1357,7 +1423,9 @@ impl eframe::App for AltiumDbApp {
 
         // --- Components panel ---
         let comp_extra = panel_extra_width(ctx);
-        let comp_content = self.components.iter()
+        let comp_content = self
+            .components
+            .iter()
             .map(|c| text_width(ctx, &c.mpn))
             .fold(0.0f32, f32::max);
         let comp_w = (comp_content + comp_extra).clamp(180.0, 320.0);
@@ -1429,7 +1497,8 @@ impl eframe::App for AltiumDbApp {
                                         .width(ui.available_width())
                                         .selected_text(&current)
                                         .show_ui(ui, |ui| {
-                                            if ui.selectable_label(sel.is_empty(), "Any").clicked() {
+                                            if ui.selectable_label(sel.is_empty(), "Any").clicked()
+                                            {
                                                 sel.clear();
                                             }
                                             ui.separator();
@@ -1459,112 +1528,171 @@ impl eframe::App for AltiumDbApp {
                         ui.label("Select a category first");
                     }
                 } else {
-                ui.heading("Components");
-                ui.separator();
+                    ui.heading("Components");
+                    ui.separator();
 
-                if self.selected_category.is_some() {
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        let btn_text = if self.editing_component.is_some() { "Save" } else { "+" };
-                        if ui.small_button(btn_text).clicked() {
-                            let item_id = self.component_input.trim().to_string();
-                            if !item_id.is_empty() {
-                                if let Some(ref cat) = self.selected_category {
-                                    db::ensure_table(&self.conn, cat).ok();
-                                    if let Some(edit_id) = self.editing_component.clone() {
-                                        db::update_component(&self.conn, cat, &db::Component {
-                                            id: edit_id,
-                                            mpn: item_id.clone(),
-                                            ..db::Component::default()
-                                        }).ok();
-                                        self.editing_component = None;
-                                    } else {
-                                        db::add_component(&self.conn, cat, &db::Component {
-                                            mpn: item_id.clone(),
-                                            ..db::Component::default()
-                                        }).ok();
+                    if self.selected_category.is_some() {
+                        let row = (ui.cursor().min.x, ui.available_width());
+                        ui.horizontal(|ui| {
+                            let btn_text = if self.editing_component.is_some() {
+                                "Save"
+                            } else {
+                                "+"
+                            };
+                            if ui.small_button(btn_text).clicked() {
+                                let item_id = self.component_input.trim().to_string();
+                                if !item_id.is_empty() {
+                                    if let Some(ref cat) = self.selected_category {
+                                        db::ensure_table(&self.conn, cat).ok();
+                                        if let Some(edit_id) = self.editing_component.clone() {
+                                            db::update_component(
+                                                &self.conn,
+                                                cat,
+                                                &db::Component {
+                                                    id: edit_id,
+                                                    mpn: item_id.clone(),
+                                                    ..db::Component::default()
+                                                },
+                                            )
+                                            .ok();
+                                            self.editing_component = None;
+                                        } else {
+                                            db::add_component(
+                                                &self.conn,
+                                                cat,
+                                                &db::Component {
+                                                    mpn: item_id.clone(),
+                                                    ..db::Component::default()
+                                                },
+                                            )
+                                            .ok();
+                                        }
                                     }
+                                    self.component_input.clear();
+                                    self.refresh_components();
+                                    self.set_status_ok();
                                 }
-                                self.component_input.clear();
-                                self.refresh_components();
-                                self.set_status_ok();
                             }
-                        }
-                        let w = stretch_width(ui, row, 0.0);
-                        let response = ui.add(egui::TextEdit::singleline(&mut self.component_input).desired_width(w));
-                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            let item_id = self.component_input.trim().to_string();
-                            if !item_id.is_empty() {
-                                if let Some(ref cat) = self.selected_category {
-                                    db::ensure_table(&self.conn, cat).ok();
-                                    if let Some(edit_id) = self.editing_component.clone() {
-                                        db::update_component(&self.conn, cat, &db::Component {
-                                            id: edit_id,
-                                            mpn: item_id.clone(),
-                                            ..db::Component::default()
-                                        }).ok();
-                                        self.editing_component = None;
-                                    } else {
-                                        db::add_component(&self.conn, cat, &db::Component {
-                                            mpn: item_id.clone(),
-                                            ..db::Component::default()
-                                        }).ok();
+                            let w = stretch_width(ui, row, 0.0);
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.component_input)
+                                    .desired_width(w),
+                            );
+                            if response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                let item_id = self.component_input.trim().to_string();
+                                if !item_id.is_empty() {
+                                    if let Some(ref cat) = self.selected_category {
+                                        db::ensure_table(&self.conn, cat).ok();
+                                        if let Some(edit_id) = self.editing_component.clone() {
+                                            db::update_component(
+                                                &self.conn,
+                                                cat,
+                                                &db::Component {
+                                                    id: edit_id,
+                                                    mpn: item_id.clone(),
+                                                    ..db::Component::default()
+                                                },
+                                            )
+                                            .ok();
+                                            self.editing_component = None;
+                                        } else {
+                                            db::add_component(
+                                                &self.conn,
+                                                cat,
+                                                &db::Component {
+                                                    mpn: item_id.clone(),
+                                                    ..db::Component::default()
+                                                },
+                                            )
+                                            .ok();
+                                        }
                                     }
+                                    self.component_input.clear();
+                                    self.refresh_components();
+                                    self.set_status_ok();
                                 }
-                                self.component_input.clear();
-                                self.refresh_components();
-                                self.set_status_ok();
-                            }
-                        }
-                    });
-                } else {
-                    ui.label("Select a category first");
-                }
-
-                ui.separator();
-
-                let selected = self.selected_component_id.clone();
-                let mut to_select = None;
-                let mut to_delete = None;
-                let mut to_edit = None;
-                let mut to_clone_comp = None;
-                let mut hovered_comp: Option<String> = None;
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for comp in &self.components {
-                        let is_selected = selected == Some(comp.id.clone());
-                        let response = ui.selectable_label(is_selected, &comp.mpn);
-                        if response.clicked() {
-                            to_select = Some(comp.id.clone());
-                        }
-                        if response.hovered() {
-                            hovered_comp = Some(comp.id.clone());
-                        }
-                        response.context_menu(|ui| {
-                            if ui.button("Edit").clicked() {
-                                to_edit = Some(comp.clone());
-                                ui.close_menu();
-                            }
-                            if ui.button("Clone").clicked() {
-                                to_clone_comp = Some(comp.clone());
-                                ui.close_menu();
-                            }
-                            if ui.button("Delete").clicked() {
-                                to_delete = Some(comp.id.clone());
-                                ui.close_menu();
                             }
                         });
+                    } else {
+                        ui.label("Select a category first");
                     }
-                });
 
-                if hovered_comp.is_some() && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
-                    to_delete = hovered_comp;
-                }
+                    ui.separator();
 
-                if let Some(id) = to_select {
-                    self.selected_component_id = Some(id.clone());
-                    self.refresh_custom_values();
-                    if let Some(comp) = self.components.iter().find(|c| c.id == id) {
+                    let selected = self.selected_component_id.clone();
+                    let mut to_select = None;
+                    let mut to_delete = None;
+                    let mut to_edit = None;
+                    let mut to_clone_comp = None;
+                    let mut hovered_comp: Option<String> = None;
+
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for comp in &self.components {
+                            let is_selected = selected == Some(comp.id.clone());
+                            let response = ui.selectable_label(is_selected, &comp.mpn);
+                            if response.clicked() {
+                                to_select = Some(comp.id.clone());
+                            }
+                            if response.hovered() {
+                                hovered_comp = Some(comp.id.clone());
+                            }
+                            response.context_menu(|ui| {
+                                if ui.button("Edit").clicked() {
+                                    to_edit = Some(comp.clone());
+                                    ui.close_menu();
+                                }
+                                if ui.button("Clone").clicked() {
+                                    to_clone_comp = Some(comp.clone());
+                                    ui.close_menu();
+                                }
+                                if ui.button("Delete").clicked() {
+                                    to_delete = Some(comp.id.clone());
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    });
+
+                    if hovered_comp.is_some()
+                        && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete))
+                    {
+                        to_delete = hovered_comp;
+                    }
+
+                    if let Some(id) = to_select {
+                        self.selected_component_id = Some(id.clone());
+                        self.refresh_custom_values();
+                        if let Some(comp) = self.components.iter().find(|c| c.id == id) {
+                            self.mpn_input = comp.mpn.clone();
+                            self.manufacturer_input = comp.manufacturer.clone();
+                            self.verified_input = comp.verified;
+                            self.library_ref_input = comp.library_ref.clone();
+                            self.footprint_ref_input = comp.footprint_ref.clone();
+                            self.library_path_input = comp.library_path.clone();
+                            self.footprint_path_input = comp.footprint_path.clone();
+                            self.footprint_ref2_input = comp.footprint_ref2.clone();
+                            self.footprint_path2_input = comp.footprint_path2.clone();
+                            self.footprint_ref3_input = comp.footprint_ref3.clone();
+                            self.footprint_path3_input = comp.footprint_path3.clone();
+                            self.description_input = comp.description.clone();
+                            self.component_link1_description_input =
+                                comp.component_link1_description.clone();
+                            self.component_link1_url_input = comp.component_link1_url.clone();
+                            self.component_link2_description_input =
+                                comp.component_link2_description.clone();
+                            self.component_link2_url_input = comp.component_link2_url.clone();
+                            self.component_link3_description_input =
+                                comp.component_link3_description.clone();
+                            self.component_link3_url_input = comp.component_link3_url.clone();
+                        }
+                    }
+                    if let Some(comp) = to_edit {
+                        let comp_id = comp.id.clone();
+                        self.selected_component_id = Some(comp_id.clone());
+                        self.editing_component = Some(comp_id);
+                        self.component_input = comp.mpn.clone();
                         self.mpn_input = comp.mpn.clone();
                         self.manufacturer_input = comp.manufacturer.clone();
                         self.verified_input = comp.verified;
@@ -1577,57 +1705,36 @@ impl eframe::App for AltiumDbApp {
                         self.footprint_ref3_input = comp.footprint_ref3.clone();
                         self.footprint_path3_input = comp.footprint_path3.clone();
                         self.description_input = comp.description.clone();
-                        self.component_link1_description_input = comp.component_link1_description.clone();
+                        self.component_link1_description_input =
+                            comp.component_link1_description.clone();
                         self.component_link1_url_input = comp.component_link1_url.clone();
-                        self.component_link2_description_input = comp.component_link2_description.clone();
+                        self.component_link2_description_input =
+                            comp.component_link2_description.clone();
                         self.component_link2_url_input = comp.component_link2_url.clone();
-                        self.component_link3_description_input = comp.component_link3_description.clone();
+                        self.component_link3_description_input =
+                            comp.component_link3_description.clone();
                         self.component_link3_url_input = comp.component_link3_url.clone();
+                        self.refresh_custom_values();
                     }
-                }
-                if let Some(comp) = to_edit {
-                    let comp_id = comp.id.clone();
-                    self.selected_component_id = Some(comp_id.clone());
-                    self.editing_component = Some(comp_id);
-                    self.component_input = comp.mpn.clone();
-                    self.mpn_input = comp.mpn.clone();
-                    self.manufacturer_input = comp.manufacturer.clone();
-                    self.verified_input = comp.verified;
-                    self.library_ref_input = comp.library_ref.clone();
-                    self.footprint_ref_input = comp.footprint_ref.clone();
-                    self.library_path_input = comp.library_path.clone();
-                    self.footprint_path_input = comp.footprint_path.clone();
-                    self.footprint_ref2_input = comp.footprint_ref2.clone();
-                    self.footprint_path2_input = comp.footprint_path2.clone();
-                    self.footprint_ref3_input = comp.footprint_ref3.clone();
-                    self.footprint_path3_input = comp.footprint_path3.clone();
-                    self.description_input = comp.description.clone();
-                    self.component_link1_description_input = comp.component_link1_description.clone();
-                    self.component_link1_url_input = comp.component_link1_url.clone();
-                    self.component_link2_description_input = comp.component_link2_description.clone();
-                    self.component_link2_url_input = comp.component_link2_url.clone();
-                    self.component_link3_description_input = comp.component_link3_description.clone();
-                    self.component_link3_url_input = comp.component_link3_url.clone();
-                    self.refresh_custom_values();
-                }
-                if let Some(comp) = to_clone_comp {
-                    if let Some(ref cat) = self.selected_category {
-                        let exists = |id: &str| db::mpn_exists(&self.conn, cat, id).unwrap_or(false);
-                        let new_id = unique_name(&comp.mpn, exists);
-                        db::clone_component(&self.conn, cat, &comp.id, &new_id).ok();
-                        self.set_status(format!("Component cloned as '{}'", new_id));
+                    if let Some(comp) = to_clone_comp {
+                        if let Some(ref cat) = self.selected_category {
+                            let exists =
+                                |id: &str| db::mpn_exists(&self.conn, cat, id).unwrap_or(false);
+                            let new_id = unique_name(&comp.mpn, exists);
+                            db::clone_component(&self.conn, cat, &comp.id, &new_id).ok();
+                            self.set_status(format!("Component cloned as '{}'", new_id));
+                        }
+                        self.refresh_components();
                     }
-                    self.refresh_components();
-                }
-                if let Some(id) = to_delete {
-                    if let Some(ref cat) = self.selected_category {
-                        db::delete_component(&self.conn, cat, &id).ok();
+                    if let Some(id) = to_delete {
+                        if let Some(ref cat) = self.selected_category {
+                            db::delete_component(&self.conn, cat, &id).ok();
+                        }
+                        self.refresh_components();
+                        self.selected_component_id = None;
+                        self.custom_values.clear();
+                        self.set_status_ok();
                     }
-                    self.refresh_components();
-                    self.selected_component_id = None;
-                    self.custom_values.clear();
-                    self.set_status_ok();
-                }
                 }
             });
 
@@ -1654,10 +1761,8 @@ impl eframe::App for AltiumDbApp {
                                 .show(ui, |ui| {
                                     for (_cat, comp) in &self.search_results {
                                         let is_selected = selected == Some(comp.id.clone());
-                                        let response = ui.selectable_label(
-                                            is_selected,
-                                            comp.mpn.clone(),
-                                        );
+                                        let response =
+                                            ui.selectable_label(is_selected, comp.mpn.clone());
                                         if response.clicked() {
                                             to_select = Some(comp.id.clone());
                                         }
@@ -1676,9 +1781,11 @@ impl eframe::App for AltiumDbApp {
                             }
                         });
 
-                    let found = self.search_results.iter().find(|(_, comp)| {
-                        self.search_selected.as_ref() == Some(&comp.id)
-                    }).cloned();
+                    let found = self
+                        .search_results
+                        .iter()
+                        .find(|(_, comp)| self.search_selected.as_ref() == Some(&comp.id))
+                        .cloned();
                     if let Some((cat, comp)) = found {
                         ui.horizontal(|ui| {
                             ui.heading(&comp.mpn);
@@ -1723,427 +1830,542 @@ impl eframe::App for AltiumDbApp {
                     });
                 }
             } else {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-            if let Some(ref cat) = self.selected_category.clone() {
-                if let Some(comp_id) = self.selected_component_id.clone() {
-                    ui.horizontal(|ui| {
-                        ui.heading("Base Fields");
-                        if ui.button("Fields...").clicked() {
-                            self.fields_editor_open = true;
-                        }
-                    });
-                    ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(ref cat) = self.selected_category.clone() {
+                        if let Some(comp_id) = self.selected_component_id.clone() {
+                            ui.horizontal(|ui| {
+                                ui.heading("Base Fields");
+                                if ui.button("Fields...").clicked() {
+                                    self.fields_editor_open = true;
+                                }
+                            });
+                            ui.separator();
 
-                    let mut save_component = false;
+                            let mut save_component = false;
 
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("MPN:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.mpn_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Manufacturer:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.manufacturer_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Library Ref:");
-                        let extra = button_width(ui, "Browse") + button_width(ui, "View")
-                            + 2.0 * ui.spacing().item_spacing.x;
-                        let w = stretch_width(ui, row, extra);
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut self.library_ref_input)
-                                .desired_width(w),
-                        );
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                        if ui.button("Browse").clicked() {
-                            self.pick_symbol_lib(ctx);
-                        }
-                        if ui.button("View").clicked() && !self.library_ref_input.is_empty() {
-                            let name = self.library_ref_input.trim().to_string();
-                            let folder = self.settings_symbols_folder.clone();
-                            let rel = self.library_path_input.trim().to_string();
-                            self.render_and_show(ctx, folder, rel, true, &name);
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Library Path:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.library_path_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Ref:");
-                        let extra = button_width(ui, "Browse") + button_width(ui, "View")
-                            + 2.0 * ui.spacing().item_spacing.x;
-                        let w = stretch_width(ui, row, extra);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_ref_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                        if ui.button("Browse").clicked() {
-                            self.open_browse(ctx, BrowseTarget::Footprint1);
-                        }
-                        if ui.button("View").clicked() && !self.footprint_ref_input.is_empty() {
-                            let name = self.footprint_ref_input.trim().to_string();
-                            let folder = self.settings_footprints_folder.clone();
-                            let rel = self.footprint_path_input.trim().to_string();
-                            self.render_and_show(ctx, folder, rel, false, &name);
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Path:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_path_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Ref 2:");
-                        let extra = button_width(ui, "Browse") + button_width(ui, "View")
-                            + 2.0 * ui.spacing().item_spacing.x;
-                        let w = stretch_width(ui, row, extra);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_ref2_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                        if ui.button("Browse").clicked() {
-                            self.open_browse(ctx, BrowseTarget::Footprint2);
-                        }
-                        if ui.button("View").clicked() && !self.footprint_ref2_input.is_empty() {
-                            let name = self.footprint_ref2_input.trim().to_string();
-                            let folder = self.settings_footprints_folder.clone();
-                            let rel = self.footprint_path2_input.trim().to_string();
-                            self.render_and_show(ctx, folder, rel, false, &name);
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Path 2:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_path2_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Ref 3:");
-                        let extra = button_width(ui, "Browse") + button_width(ui, "View")
-                            + 2.0 * ui.spacing().item_spacing.x;
-                        let w = stretch_width(ui, row, extra);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_ref3_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                        if ui.button("Browse").clicked() {
-                            self.open_browse(ctx, BrowseTarget::Footprint3);
-                        }
-                        if ui.button("View").clicked() && !self.footprint_ref3_input.is_empty() {
-                            let name = self.footprint_ref3_input.trim().to_string();
-                            let folder = self.settings_footprints_folder.clone();
-                            let rel = self.footprint_path3_input.trim().to_string();
-                            self.render_and_show(ctx, folder, rel, false, &name);
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Footprint Path 3:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.footprint_path3_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink1Description:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link1_description_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink1URL:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link1_url_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink2Description:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link2_description_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink2URL:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link2_url_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink3Description:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link3_description_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("ComponentLink3URL:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.component_link3_url_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Description:");
-                        let w = stretch_width(ui, row, 0.0);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.description_input).desired_width(w));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            save_component = true;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.verified_input, "Verified");
-                    });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("MPN:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.mpn_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Manufacturer:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.manufacturer_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Library Ref:");
+                                let extra = button_width(ui, "Browse")
+                                    + button_width(ui, "View")
+                                    + 2.0 * ui.spacing().item_spacing.x;
+                                let w = stretch_width(ui, row, extra);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.library_ref_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                                if ui.button("Browse").clicked() {
+                                    self.pick_symbol_lib(ctx);
+                                }
+                                if ui.button("View").clicked() && !self.library_ref_input.is_empty()
+                                {
+                                    let name = self.library_ref_input.trim().to_string();
+                                    let folder = self.settings_symbols_folder.clone();
+                                    let rel = self.library_path_input.trim().to_string();
+                                    self.render_and_show(ctx, folder, rel, true, &name);
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Library Path:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.library_path_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Ref:");
+                                let extra = button_width(ui, "Browse")
+                                    + button_width(ui, "View")
+                                    + 2.0 * ui.spacing().item_spacing.x;
+                                let w = stretch_width(ui, row, extra);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_ref_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                                if ui.button("Browse").clicked() {
+                                    self.open_browse(ctx, BrowseTarget::Footprint1);
+                                }
+                                if ui.button("View").clicked()
+                                    && !self.footprint_ref_input.is_empty()
+                                {
+                                    let name = self.footprint_ref_input.trim().to_string();
+                                    let folder = self.settings_footprints_folder.clone();
+                                    let rel = self.footprint_path_input.trim().to_string();
+                                    self.render_and_show(ctx, folder, rel, false, &name);
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Path:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_path_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Ref 2:");
+                                let extra = button_width(ui, "Browse")
+                                    + button_width(ui, "View")
+                                    + 2.0 * ui.spacing().item_spacing.x;
+                                let w = stretch_width(ui, row, extra);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_ref2_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                                if ui.button("Browse").clicked() {
+                                    self.open_browse(ctx, BrowseTarget::Footprint2);
+                                }
+                                if ui.button("View").clicked()
+                                    && !self.footprint_ref2_input.is_empty()
+                                {
+                                    let name = self.footprint_ref2_input.trim().to_string();
+                                    let folder = self.settings_footprints_folder.clone();
+                                    let rel = self.footprint_path2_input.trim().to_string();
+                                    self.render_and_show(ctx, folder, rel, false, &name);
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Path 2:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_path2_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Ref 3:");
+                                let extra = button_width(ui, "Browse")
+                                    + button_width(ui, "View")
+                                    + 2.0 * ui.spacing().item_spacing.x;
+                                let w = stretch_width(ui, row, extra);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_ref3_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                                if ui.button("Browse").clicked() {
+                                    self.open_browse(ctx, BrowseTarget::Footprint3);
+                                }
+                                if ui.button("View").clicked()
+                                    && !self.footprint_ref3_input.is_empty()
+                                {
+                                    let name = self.footprint_ref3_input.trim().to_string();
+                                    let folder = self.settings_footprints_folder.clone();
+                                    let rel = self.footprint_path3_input.trim().to_string();
+                                    self.render_and_show(ctx, folder, rel, false, &name);
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Footprint Path 3:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.footprint_path3_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink1Description:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.component_link1_description_input,
+                                    )
+                                    .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink1URL:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.component_link1_url_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink2Description:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.component_link2_description_input,
+                                    )
+                                    .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink2URL:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.component_link2_url_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink3Description:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.component_link3_description_input,
+                                    )
+                                    .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("ComponentLink3URL:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.component_link3_url_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Description:");
+                                let w = stretch_width(ui, row, 0.0);
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.description_input)
+                                        .desired_width(w),
+                                );
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    save_component = true;
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.verified_input, "Verified");
+                            });
 
-                    ui.separator();
-                    ui.heading("Custom Fields");
-                    ui.separator();
+                            ui.separator();
+                            ui.heading("Custom Fields");
+                            ui.separator();
 
-                    let row = (ui.cursor().min.x, ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label("Field name:");
-                        let btn_text = if self.editing_field.is_some() { "Save" } else { "+" };
-                        let w = stretch_width(ui, row, button_width(ui, btn_text) + ui.spacing().item_spacing.x);
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.field_col_input).desired_width(w));
-                        let mut do_action = ui.button(btn_text).clicked();
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            do_action = true;
-                        }
-                        if do_action {
-                            let field_name = self.field_col_input.trim().to_string();
-                            if !field_name.is_empty() {
-                                if let Some(lib) = self.dbl.find_library_mut(cat) {
-                                    if let Some(ref old_col) = self.editing_field.clone() {
-                                        if old_col != &field_name {
-                                            if let Some(f) = lib.fields.iter_mut().find(|f| f.column == *old_col) {
-                                                f.column = field_name.clone();
-                                                f.parameter = field_name.clone();
+                            let row = (ui.cursor().min.x, ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Field name:");
+                                let btn_text = if self.editing_field.is_some() {
+                                    "Save"
+                                } else {
+                                    "+"
+                                };
+                                let w = stretch_width(
+                                    ui,
+                                    row,
+                                    button_width(ui, btn_text) + ui.spacing().item_spacing.x,
+                                );
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.field_col_input)
+                                        .desired_width(w),
+                                );
+                                let mut do_action = ui.button(btn_text).clicked();
+                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    do_action = true;
+                                }
+                                if do_action {
+                                    let field_name = self.field_col_input.trim().to_string();
+                                    if !field_name.is_empty() {
+                                        if let Some(lib) = self.dbl.find_library_mut(cat) {
+                                            if let Some(ref old_col) = self.editing_field.clone() {
+                                                if old_col != &field_name {
+                                                    if let Some(f) = lib
+                                                        .fields
+                                                        .iter_mut()
+                                                        .find(|f| f.column == *old_col)
+                                                    {
+                                                        f.column = field_name.clone();
+                                                        f.parameter = field_name.clone();
+                                                    }
+                                                    db::rename_column(
+                                                        &self.conn,
+                                                        cat,
+                                                        old_col,
+                                                        &field_name,
+                                                    )
+                                                    .ok();
+                                                }
+                                                self.editing_field = None;
+                                            } else {
+                                                if !lib
+                                                    .fields
+                                                    .iter()
+                                                    .any(|f| f.column == field_name)
+                                                {
+                                                    lib.fields.push(altium_dbl::Field {
+                                                        column: field_name.clone(),
+                                                        parameter: field_name.clone(),
+                                                        is_key: false,
+                                                        visible_on_add: true,
+                                                        add_mode: 0,
+                                                        remove_mode: 0,
+                                                        update_mode: 0,
+                                                    });
+                                                    db::add_column(&self.conn, cat, &field_name)
+                                                        .ok();
+                                                }
                                             }
-                                            db::rename_column(&self.conn, cat, old_col, &field_name).ok();
-                                        }
-                                        self.editing_field = None;
-                                    } else {
-                                        if !lib.fields.iter().any(|f| f.column == field_name) {
-                                            lib.fields.push(altium_dbl::Field {
-                                                column: field_name.clone(),
-                                                parameter: field_name.clone(),
-                                                is_key: false,
-                                                visible_on_add: true,
-                                                add_mode: 0,
-                                                remove_mode: 0,
-                                                update_mode: 0,
-                                            });
-                                            db::add_column(&self.conn, cat, &field_name).ok();
+                                            self.save_dbl();
+                                            self.refresh_components();
+                                            self.refresh_custom_values();
+                                            self.field_col_input.clear();
+                                            self.editing_field = None;
+                                            self.set_status_ok();
                                         }
                                     }
-                                    self.save_dbl();
-                                    self.refresh_components();
-                                    self.refresh_custom_values();
-                                    self.field_col_input.clear();
-                                    self.editing_field = None;
-                                    self.set_status_ok();
+                                }
+                            });
+
+                            ui.separator();
+
+                            let mut values = self.custom_values.clone();
+                            let mut changed = None;
+                            let mut to_delete_field = None;
+                            let mut to_edit_field = None;
+                            let mut hovered_field: Option<String> = None;
+
+                            for (i, (col, val)) in values.iter_mut().enumerate() {
+                                let display = self
+                                    .dbl
+                                    .find_library(cat)
+                                    .and_then(|l| l.fields.iter().find(|f| &f.column == col))
+                                    .map(|f| f.column.clone())
+                                    .unwrap_or_else(|| col.clone());
+
+                                let mut buf = val.clone();
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                let text_response = ui
+                                    .horizontal(|ui| {
+                                        ui.label(format!("{}:", display));
+                                        let w = stretch_width(ui, row, 0.0);
+                                        let r = ui.add(
+                                            egui::TextEdit::singleline(&mut buf).desired_width(w),
+                                        );
+                                        if r.changed() {
+                                            changed = Some((i, buf.clone()));
+                                        }
+                                        r
+                                    })
+                                    .inner;
+
+                                if text_response.hovered() {
+                                    hovered_field = Some(col.clone());
+                                }
+
+                                text_response.context_menu(|ui| {
+                                    if ui.button("Edit").clicked() {
+                                        to_edit_field = Some((col.clone(), display.clone()));
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        to_delete_field = Some(col.clone());
+                                        ui.close_menu();
+                                    }
+                                });
+                            }
+
+                            ui.horizontal(|ui| {
+                                if ui.button("Save").clicked()
+                                    || ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S))
+                                {
+                                    save_component = true;
+                                }
+                                if ui.small_button("Clear").clicked() {
+                                    self.mpn_input.clear();
+                                    self.manufacturer_input.clear();
+                                    self.verified_input = false;
+                                    self.library_ref_input.clear();
+                                    self.footprint_ref_input.clear();
+                                    self.library_path_input.clear();
+                                    self.footprint_path_input.clear();
+                                    self.footprint_ref2_input.clear();
+                                    self.footprint_path2_input.clear();
+                                    self.footprint_ref3_input.clear();
+                                    self.footprint_path3_input.clear();
+                                    self.description_input.clear();
+                                    self.component_link1_description_input.clear();
+                                    self.component_link1_url_input.clear();
+                                    self.component_link2_description_input.clear();
+                                    self.component_link2_url_input.clear();
+                                    self.component_link3_description_input.clear();
+                                    self.component_link3_url_input.clear();
+                                    for (_, val) in &mut self.custom_values {
+                                        val.clear();
+                                    }
+                                }
+                            });
+
+                            if save_component {
+                                let mpn = self.mpn_input.trim().to_string();
+                                let manufacturer = self.manufacturer_input.trim().to_string();
+                                let verified = self.verified_input;
+                                let library_ref = self.library_ref_input.trim().to_string();
+                                let footprint_ref = self.footprint_ref_input.trim().to_string();
+                                let library_path = self.library_path_input.trim().to_string();
+                                let footprint_path = self.footprint_path_input.trim().to_string();
+                                let footprint_ref2 = self.footprint_ref2_input.trim().to_string();
+                                let footprint_path2 = self.footprint_path2_input.trim().to_string();
+                                let footprint_ref3 = self.footprint_ref3_input.trim().to_string();
+                                let footprint_path3 = self.footprint_path3_input.trim().to_string();
+                                let description = self.description_input.trim().to_string();
+                                let component_link1_description =
+                                    self.component_link1_description_input.trim().to_string();
+                                let component_link1_url =
+                                    self.component_link1_url_input.trim().to_string();
+                                let component_link2_description =
+                                    self.component_link2_description_input.trim().to_string();
+                                let component_link2_url =
+                                    self.component_link2_url_input.trim().to_string();
+                                let component_link3_description =
+                                    self.component_link3_description_input.trim().to_string();
+                                let component_link3_url =
+                                    self.component_link3_url_input.trim().to_string();
+                                db::update_component(
+                                    &self.conn,
+                                    cat,
+                                    &db::Component {
+                                        id: comp_id.clone(),
+                                        mpn,
+                                        manufacturer,
+                                        verified,
+                                        library_ref,
+                                        footprint_ref,
+                                        description,
+                                        component_link1_description,
+                                        component_link1_url,
+                                        component_link2_description,
+                                        component_link2_url,
+                                        component_link3_description,
+                                        component_link3_url,
+                                        library_path,
+                                        footprint_path,
+                                        footprint_ref2,
+                                        footprint_path2,
+                                        footprint_ref3,
+                                        footprint_path3,
+                                    },
+                                )
+                                .ok();
+                                self.refresh_components();
+                                self.set_status_ok();
+                            }
+
+                            if hovered_field.is_some()
+                                && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete))
+                            {
+                                to_delete_field = hovered_field;
+                            }
+
+                            if let Some((i, new_val)) = changed {
+                                if let Some((col, _)) = values.get(i) {
+                                    let col_clone = col.clone();
+                                    self.custom_values[i].1 = new_val.clone();
+                                    db::set_custom_value(
+                                        &self.conn, cat, &comp_id, &col_clone, &new_val,
+                                    )
+                                    .ok();
                                 }
                             }
+
+                            if let Some((col, _display)) = to_edit_field {
+                                self.field_col_input = col.clone();
+                                self.editing_field = Some(col);
+                            }
+
+                            if let Some(col) = to_delete_field {
+                                db::drop_column(&self.conn, cat, &col).ok();
+                                if let Some(lib) = self.dbl.find_library_mut(cat) {
+                                    lib.fields.retain(|f| f.column != col);
+                                }
+                                self.save_dbl();
+                                self.refresh_components();
+                                self.refresh_custom_values();
+                                self.set_status_ok();
+                            }
+                        } else {
+                            ui.centered_and_justified(|ui| {
+                                ui.label("Select a component to edit its fields");
+                            });
                         }
-                    });
-
-                    ui.separator();
-
-                    let mut values = self.custom_values.clone();
-                    let mut changed = None;
-                    let mut to_delete_field = None;
-                    let mut to_edit_field = None;
-                    let mut hovered_field: Option<String> = None;
-
-                    for (i, (col, val)) in values.iter_mut().enumerate() {
-                        let display = self.dbl.find_library(cat)
-                        .and_then(|l| l.fields.iter().find(|f| &f.column == col))
-                        .map(|f| f.column.clone())
-                        .unwrap_or_else(|| col.clone());
-
-                        let mut buf = val.clone();
-                        let row = (ui.cursor().min.x, ui.available_width());
-                        let text_response = ui.horizontal(|ui| {
-                            ui.label(format!("{}:", display));
-                            let w = stretch_width(ui, row, 0.0);
-                            let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(w));
-                            if r.changed() {
-                                changed = Some((i, buf.clone()));
-                            }
-                            r
-                        }).inner;
-
-                        if text_response.hovered() {
-                            hovered_field = Some(col.clone());
-                        }
-
-                        text_response.context_menu(|ui| {
-                            if ui.button("Edit").clicked() {
-                                to_edit_field = Some((col.clone(), display.clone()));
-                                ui.close_menu();
-                            }
-                            if ui.button("Delete").clicked() {
-                                to_delete_field = Some(col.clone());
-                                ui.close_menu();
-                            }
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.label("Select a category to get started");
                         });
                     }
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() || ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
-                            save_component = true;
-                        }
-                        if ui.small_button("Clear").clicked() {
-                            self.mpn_input.clear();
-                            self.manufacturer_input.clear();
-                            self.verified_input = false;
-                            self.library_ref_input.clear();
-                            self.footprint_ref_input.clear();
-                            self.library_path_input.clear();
-                            self.footprint_path_input.clear();
-                            self.footprint_ref2_input.clear();
-                            self.footprint_path2_input.clear();
-                            self.footprint_ref3_input.clear();
-                            self.footprint_path3_input.clear();
-                            self.description_input.clear();
-                            self.component_link1_description_input.clear();
-                            self.component_link1_url_input.clear();
-                            self.component_link2_description_input.clear();
-                            self.component_link2_url_input.clear();
-                            self.component_link3_description_input.clear();
-                            self.component_link3_url_input.clear();
-                            for (_, val) in &mut self.custom_values {
-                                val.clear();
-                            }
-                        }
-                    });
-
-                    if save_component {
-                        let mpn = self.mpn_input.trim().to_string();
-                        let manufacturer = self.manufacturer_input.trim().to_string();
-                        let verified = self.verified_input;
-                        let library_ref = self.library_ref_input.trim().to_string();
-                        let footprint_ref = self.footprint_ref_input.trim().to_string();
-                        let library_path = self.library_path_input.trim().to_string();
-                        let footprint_path = self.footprint_path_input.trim().to_string();
-                        let footprint_ref2 = self.footprint_ref2_input.trim().to_string();
-                        let footprint_path2 = self.footprint_path2_input.trim().to_string();
-                        let footprint_ref3 = self.footprint_ref3_input.trim().to_string();
-                        let footprint_path3 = self.footprint_path3_input.trim().to_string();
-                        let description = self.description_input.trim().to_string();
-                        let component_link1_description = self.component_link1_description_input.trim().to_string();
-                        let component_link1_url = self.component_link1_url_input.trim().to_string();
-                        let component_link2_description = self.component_link2_description_input.trim().to_string();
-                        let component_link2_url = self.component_link2_url_input.trim().to_string();
-                        let component_link3_description = self.component_link3_description_input.trim().to_string();
-                        let component_link3_url = self.component_link3_url_input.trim().to_string();
-                        db::update_component(&self.conn, cat, &db::Component {
-                            id: comp_id.clone(),
-                            mpn,
-                            manufacturer,
-                            verified,
-                            library_ref,
-                            footprint_ref,
-                            description,
-                            component_link1_description,
-                            component_link1_url,
-                            component_link2_description,
-                            component_link2_url,
-                            component_link3_description,
-                            component_link3_url,
-                            library_path,
-                            footprint_path,
-                            footprint_ref2,
-                            footprint_path2,
-                            footprint_ref3,
-                            footprint_path3,
-                        }).ok();
-                        self.refresh_components();
-                        self.set_status_ok();
-                    }
-
-                    if hovered_field.is_some() && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
-                        to_delete_field = hovered_field;
-                    }
-
-                    if let Some((i, new_val)) = changed {
-                        if let Some((col, _)) = values.get(i) {
-                            let col_clone = col.clone();
-                            self.custom_values[i].1 = new_val.clone();
-                            db::set_custom_value(&self.conn, cat, &comp_id, &col_clone, &new_val).ok();
-                        }
-                    }
-
-                    if let Some((col, _display)) = to_edit_field {
-                        self.field_col_input = col.clone();
-                        self.editing_field = Some(col);
-                    }
-
-                    if let Some(col) = to_delete_field {
-                        db::drop_column(&self.conn, cat, &col).ok();
-                        if let Some(lib) = self.dbl.find_library_mut(cat) {
-                            lib.fields.retain(|f| f.column != col);
-                        }
-                        self.save_dbl();
-                        self.refresh_components();
-                        self.refresh_custom_values();
-                        self.set_status_ok();
-                    }
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Select a component to edit its fields");
-                    });
-                }
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label("Select a category to get started");
                 });
-            }
-            });
             }
         });
 
@@ -2215,7 +2437,8 @@ impl eframe::App for AltiumDbApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new(self.browse_path.to_string_lossy().as_ref()).weak(),
+                                egui::RichText::new(self.browse_path.to_string_lossy().as_ref())
+                                    .weak(),
                             )
                             .truncate(),
                         );
@@ -2223,18 +2446,17 @@ impl eframe::App for AltiumDbApp {
                 });
                 ui.separator();
 
-                egui::TopBottomPanel::bottom("browse_actions_panel")
-                    .show_inside(ui, |ui| {
-                        ui.add_space(4.0);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Cancel").clicked() {
-                                cancel_clicked = true;
-                            }
-                            if ui.button("Select").clicked() {
-                                apply_clicked = true;
-                            }
-                        });
+                egui::TopBottomPanel::bottom("browse_actions_panel").show_inside(ui, |ui| {
+                    ui.add_space(4.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Cancel").clicked() {
+                            cancel_clicked = true;
+                        }
+                        if ui.button("Select").clicked() {
+                            apply_clicked = true;
+                        }
                     });
+                });
 
                 let entries = self.browse_entries.clone();
                 let sel = self.browse_selected.clone();
@@ -2271,36 +2493,34 @@ impl eframe::App for AltiumDbApp {
                             });
                     });
 
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    match &self.browse_svg {
-                        Some(svg) => {
-                            let avail = ui.available_size();
-                            let canvas_size = egui::vec2(avail.x.max(50.0), avail.y.max(50.0));
-                            let (cid, canvas_rect) = ui.allocate_space(canvas_size);
-                            ui.interact(canvas_rect, cid, egui::Sense::hover());
-                            if let Err(e) = ensure_svg_texture(
-                                ui.ctx(),
-                                svg,
-                                canvas_rect,
-                                &mut self.browse_texture,
-                                &mut self.browse_raster_size,
-                                "altiumdb_browse_preview",
-                            ) {
-                                self.set_status_err(e);
-                            }
-                            match &self.browse_texture {
-                                Some(tex) => draw_texture_fitted(ui, canvas_rect, tex),
-                                None => {
-                                    let painter = ui.painter().with_clip_rect(canvas_rect);
-                                    painter.rect_filled(canvas_rect, 0.0, preview_bg_color32(ui.ctx()));
-                                }
+                egui::CentralPanel::default().show_inside(ui, |ui| match &self.browse_svg {
+                    Some(svg) => {
+                        let avail = ui.available_size();
+                        let canvas_size = egui::vec2(avail.x.max(50.0), avail.y.max(50.0));
+                        let (cid, canvas_rect) = ui.allocate_space(canvas_size);
+                        ui.interact(canvas_rect, cid, egui::Sense::hover());
+                        if let Err(e) = ensure_svg_texture(
+                            ui.ctx(),
+                            svg,
+                            canvas_rect,
+                            &mut self.browse_texture,
+                            &mut self.browse_raster_size,
+                            "altiumdb_browse_preview",
+                        ) {
+                            self.set_status_err(e);
+                        }
+                        match &self.browse_texture {
+                            Some(tex) => draw_texture_fitted(ui, canvas_rect, tex),
+                            None => {
+                                let painter = ui.painter().with_clip_rect(canvas_rect);
+                                painter.rect_filled(canvas_rect, 0.0, preview_bg_color32(ui.ctx()));
                             }
                         }
-                        None => {
-                            ui.centered_and_justified(|ui| {
-                                ui.label("Select a file to preview");
-                            });
-                        }
+                    }
+                    None => {
+                        ui.centered_and_justified(|ui| {
+                            ui.label("Select a file to preview");
+                        });
                     }
                 });
             });
@@ -2352,9 +2572,11 @@ impl eframe::App for AltiumDbApp {
                     }
                     let mut rows: Vec<altium_dbl::Field> = Vec::new();
                     for col in &db_cols {
-                        match self.dbl.find_library(cat).and_then(|l| {
-                            l.fields.iter().find(|f| &f.column == col).cloned()
-                        }) {
+                        match self
+                            .dbl
+                            .find_library(cat)
+                            .and_then(|l| l.fields.iter().find(|f| &f.column == col).cloned())
+                        {
                             Some(f) => rows.push(f),
                             None => rows.push(altium_dbl::Field {
                                 column: col.clone(),
@@ -2403,7 +2625,10 @@ impl eframe::App for AltiumDbApp {
                                             .width(130.0)
                                             .show_ui(ui, |ui| {
                                                 for (val, label) in UPDATE_MODES {
-                                                    if ui.selectable_label(upd == val, label).clicked() {
+                                                    if ui
+                                                        .selectable_label(upd == val, label)
+                                                        .clicked()
+                                                    {
                                                         upd = val;
                                                     }
                                                 }
@@ -2414,7 +2639,10 @@ impl eframe::App for AltiumDbApp {
                                             .width(210.0)
                                             .show_ui(ui, |ui| {
                                                 for (val, label) in ADD_MODES {
-                                                    if ui.selectable_label(add == val, label).clicked() {
+                                                    if ui
+                                                        .selectable_label(add == val, label)
+                                                        .clicked()
+                                                    {
                                                         add = val;
                                                     }
                                                 }
@@ -2425,12 +2653,18 @@ impl eframe::App for AltiumDbApp {
                                             .width(200.0)
                                             .show_ui(ui, |ui| {
                                                 for (val, label) in REMOVE_MODES {
-                                                    if ui.selectable_label(rem == val, label).clicked() {
+                                                    if ui
+                                                        .selectable_label(rem == val, label)
+                                                        .clicked()
+                                                    {
                                                         rem = val;
                                                     }
                                                 }
                                             });
-                                        if upd != f.update_mode || add != f.add_mode || rem != f.remove_mode {
+                                        if upd != f.update_mode
+                                            || add != f.add_mode
+                                            || rem != f.remove_mode
+                                        {
                                             f.update_mode = upd;
                                             f.add_mode = add;
                                             f.remove_mode = rem;
@@ -2438,8 +2672,10 @@ impl eframe::App for AltiumDbApp {
                                         }
                                         if f != *field {
                                             if let Some(lib) = self.dbl.find_library_mut(cat) {
-                                                if let Some(existing) =
-                                                    lib.fields.iter_mut().find(|x| x.column == f.column)
+                                                if let Some(existing) = lib
+                                                    .fields
+                                                    .iter_mut()
+                                                    .find(|x| x.column == f.column)
                                                 {
                                                     *existing = f.clone();
                                                 } else {
@@ -2474,10 +2710,7 @@ mod tests {
     fn library_path_keeps_only_file_name() {
         let folder = "C:\\gortpowerlib\\footprints";
         let full = "C:\\gortpowerlib\\footprints\\Capacitor - MLCC\\CAP 0603_1608.PcbLib";
-        assert_eq!(
-            relative_library_path(folder, full),
-            "CAP 0603_1608.PcbLib"
-        );
+        assert_eq!(relative_library_path(folder, full), "CAP 0603_1608.PcbLib");
     }
 
     #[test]
@@ -2489,10 +2722,7 @@ mod tests {
         let target = sub.join("CAP 0603_1608.PcbLib");
         std::fs::write(&target, b"").unwrap();
 
-        let resolved = resolve_library_path(
-            dir.to_str().unwrap(),
-            "CAP 0603_1608.PcbLib",
-        );
+        let resolved = resolve_library_path(dir.to_str().unwrap(), "CAP 0603_1608.PcbLib");
         assert_eq!(resolved, target.to_string_lossy().to_string());
         let _ = std::fs::remove_dir_all(&dir);
     }

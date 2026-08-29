@@ -273,7 +273,9 @@ fn parse_courtyard_layers(data: &[u8]) -> Vec<u8> {
             continue;
         };
         let val = &suffix[eq + 1..];
-        let entry = map.entry(id).or_insert_with(|| (String::new(), String::new()));
+        let entry = map
+            .entry(id)
+            .or_insert_with(|| (String::new(), String::new()));
         if suffix[..eq + 1].ends_with("NAME=") {
             entry.0 = val.to_string();
         } else if suffix[..eq + 1].ends_with("MECHKIND=") {
@@ -359,7 +361,14 @@ fn parse_track(c: &[u8]) -> Option<Prim> {
     let x2 = r.i32()?;
     let y2 = r.i32()?;
     let width = r.i32()?;
-    Some(Prim::Track(Track { layer, x1, y1, x2, y2, width }))
+    Some(Prim::Track(Track {
+        layer,
+        x1,
+        y1,
+        x2,
+        y2,
+        width,
+    }))
 }
 
 fn parse_arc(c: &[u8]) -> Option<Prim> {
@@ -372,7 +381,15 @@ fn parse_arc(c: &[u8]) -> Option<Prim> {
     let start_angle = r.f64()?;
     let end_angle = r.f64()?;
     let width = r.i32()?;
-    Some(Prim::Arc(Arc { layer, cx, cy, radius, start_angle, end_angle, width }))
+    Some(Prim::Arc(Arc {
+        layer,
+        cx,
+        cy,
+        radius,
+        start_angle,
+        end_angle,
+        width,
+    }))
 }
 
 fn parse_via(c: &[u8]) -> Option<Prim> {
@@ -382,7 +399,12 @@ fn parse_via(c: &[u8]) -> Option<Prim> {
     let y = r.i32()?;
     let diameter = r.i32()?;
     let hole_size = r.i32()?;
-    Some(Prim::Via(Via { x, y, diameter, hole_size }))
+    Some(Prim::Via(Via {
+        x,
+        y,
+        diameter,
+        hole_size,
+    }))
 }
 
 fn parse_pad(r: &mut Reader) -> Option<Prim> {
@@ -450,7 +472,13 @@ fn parse_pad(r: &mut Reader) -> Option<Prim> {
         }
 
         // Alt-shape override: 9 means rounded rectangle.
-        let fix = |s: u8| if s == 9 { PAD_SHAPE_ROUNDED_RECTANGLE } else { s };
+        let fix = |s: u8| {
+            if s == 9 {
+                PAD_SHAPE_ROUNDED_RECTANGLE
+            } else {
+                s
+            }
+        };
         let top_shape = fix(alt_top.unwrap_or(top_shape_raw));
         let bot_shape = fix(alt_bot.unwrap_or(bot_shape_raw));
 
@@ -525,7 +553,15 @@ fn parse_text_record(r: &mut Reader, strings: &[String]) -> Option<Prim> {
         }
     }
 
-    Some(Prim::Text(Text { layer, x, y, height, rotation, mirrored, content }))
+    Some(Prim::Text(Text {
+        layer,
+        x,
+        y,
+        height,
+        rotation,
+        mirrored,
+        content,
+    }))
 }
 
 fn parse_fill(c: &[u8]) -> Option<Prim> {
@@ -537,7 +573,14 @@ fn parse_fill(c: &[u8]) -> Option<Prim> {
     let x2 = r.i32()?;
     let y2 = r.i32()?;
     let rotation = r.f64()?;
-    Some(Prim::Fill(Fill { layer, x1, y1, x2, y2, rotation }))
+    Some(Prim::Fill(Fill {
+        layer,
+        x1,
+        y1,
+        x2,
+        y2,
+        rotation,
+    }))
 }
 
 /// Parse REGION / COMPONENT_BODY payloads. Both share a common header and
@@ -603,7 +646,11 @@ fn parse_region(c: &[u8], is_body: bool) -> Option<Prim> {
 
     let (outline, _) = best?;
 
-    Some(Prim::Region(Region { layer, is_body, outline }))
+    Some(Prim::Region(Region {
+        layer,
+        is_body,
+        outline,
+    }))
 }
 
 /// Read outline vertices for a given variant.
@@ -628,18 +675,42 @@ fn read_vertices(
             let radius = probe.i32()? as f64;
             let sa = probe.f64()?;
             let ea = probe.f64()?;
-            verts.push(RegionVertex { x, y, round, cx, cy, radius, start_angle: sa, end_angle: ea });
+            verts.push(RegionVertex {
+                x,
+                y,
+                round,
+                cx,
+                cy,
+                radius,
+                start_angle: sa,
+                end_angle: ea,
+            });
         } else {
             let x = probe.f64()?;
             let y = probe.f64()?;
-            verts.push(RegionVertex { x, y, round: false, cx: 0.0, cy: 0.0, radius: 0.0, start_angle: 0.0, end_angle: 0.0 });
+            verts.push(RegionVertex {
+                x,
+                y,
+                round: false,
+                cx: 0.0,
+                cy: 0.0,
+                radius: 0.0,
+                start_angle: 0.0,
+                end_angle: 0.0,
+            });
         }
     }
     Some(verts)
 }
 
 /// Compute unconsumed byte count after outline+holes for a given variant.
-fn leftover_after(c: &[u8], count_pos: usize, raw_count: usize, ext: bool, closing: bool) -> Option<usize> {
+fn leftover_after(
+    c: &[u8],
+    count_pos: usize,
+    raw_count: usize,
+    ext: bool,
+    closing: bool,
+) -> Option<usize> {
     let mut probe = Reader::new(c);
     probe.seek(count_pos + 4);
     let n = raw_count + usize::from(closing);

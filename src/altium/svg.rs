@@ -33,7 +33,9 @@ fn fmt(v: f64) -> String {
 }
 
 fn escape_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn wrap_svg(width: f64, height: f64, body: &str, bg: &str) -> String {
@@ -113,7 +115,12 @@ impl Mapper {
 
     fn emit(&self, op: &Op) -> String {
         match op {
-            Op::Line { p1, p2, width, color } => {
+            Op::Line {
+                p1,
+                p2,
+                width,
+                color,
+            } => {
                 let (x1, y1) = self.pt(p1);
                 let (x2, y2) = self.pt(p2);
                 format!(
@@ -121,7 +128,14 @@ impl Mapper {
                     fmt(width.max(0.9))
                 )
             }
-            Op::Polyline { pts, width, color, closed, fill, fill_opacity } => {
+            Op::Polyline {
+                pts,
+                width,
+                color,
+                closed,
+                fill,
+                fill_opacity,
+            } => {
                 if pts.len() < 2 && !closed {
                     return String::new();
                 }
@@ -145,7 +159,14 @@ impl Mapper {
                     fmt(width.max(0.9))
                 )
             }
-            Op::Ellipse { center, rx, ry, stroke, fill, stroke_width } => {
+            Op::Ellipse {
+                center,
+                rx,
+                ry,
+                stroke,
+                fill,
+                stroke_width,
+            } => {
                 let (cx, cy) = self.pt(center);
                 let f = fill.clone().unwrap_or_else(|| "none".to_string());
                 format!(
@@ -155,7 +176,15 @@ impl Mapper {
                     fmt(stroke_width.max(0.9))
                 )
             }
-            Op::Rect { center, w, h, rx, rotation, stroke, fill } => {
+            Op::Rect {
+                center,
+                w,
+                h,
+                rx,
+                rotation,
+                stroke,
+                fill,
+            } => {
                 let x = self.tx(center.x - w / 2.0);
                 let y = self.ty(center.y + h / 2.0);
                 let mut attrs = format!(
@@ -185,14 +214,18 @@ impl Mapper {
                 }
                 format!("<rect {attrs}/>")
             }
-            Op::Text { pos, size, color, anchor, content, rotate } => {
+            Op::Text {
+                pos,
+                size,
+                color,
+                anchor,
+                content,
+                rotate,
+            } => {
                 let (x, y) = self.pt(pos);
                 // Standard SVG: `y` is the text baseline.
                 let rot = if rotate.abs() > 1e-9 {
-                    format!(
-                        " transform=\"rotate({} {x} {y})\"",
-                        fmt(-rotate)
-                    )
+                    format!(" transform=\"rotate({} {x} {y})\"", fmt(-rotate))
                 } else {
                     String::new()
                 };
@@ -217,7 +250,12 @@ fn finish(min_x: f64, min_y: f64, max_x: f64, max_y: f64, ops: &[Op], bg: &str) 
         body.push_str(&m.emit(op));
         body.push('\n');
     }
-    wrap_svg((max_x - min_x) + pad * 2.0, (max_y - min_y) + pad * 2.0, &body, bg)
+    wrap_svg(
+        (max_x - min_x) + pad * 2.0,
+        (max_y - min_y) + pad * 2.0,
+        &body,
+        bg,
+    )
 }
 
 #[derive(Default)]
@@ -311,8 +349,14 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                         continue;
                     }
                     let (p1, p2, w) = (
-                        Point { x: t.x1 as f64 / U, y: t.y1 as f64 / U },
-                        Point { x: t.x2 as f64 / U, y: t.y2 as f64 / U },
+                        Point {
+                            x: t.x1 as f64 / U,
+                            y: t.y1 as f64 / U,
+                        },
+                        Point {
+                            x: t.x2 as f64 / U,
+                            y: t.y2 as f64 / U,
+                        },
                         t.width as f64 / U,
                     );
                     b.add(p1.x - w, p1.y - w);
@@ -320,33 +364,72 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                     b.add(p2.x - w, p2.y - w);
                     b.add(p2.x + w, p2.y + w);
                     let color = pcb_layer_color(t.layer, courtyard).to_string();
-                    ops.push(Op::Line { p1, p2, width: w, color });
+                    ops.push(Op::Line {
+                        p1,
+                        p2,
+                        width: w,
+                        color,
+                    });
                 }
                 Prim::Arc(a) => {
                     if !pcb_render_layer(a.layer, courtyard) {
                         continue;
                     }
-                    let c = Point { x: a.cx as f64 / U, y: a.cy as f64 / U };
+                    let c = Point {
+                        x: a.cx as f64 / U,
+                        y: a.cy as f64 / U,
+                    };
                     let r = a.radius as f64 / U;
                     let w = (a.width as f64 / U).max(1.0);
                     b.add_circle(c.x, c.y, r);
                     let color = pcb_layer_color(a.layer, courtyard).to_string();
                     if a.is_full_circle() {
-                        ops.push(Op::Ellipse { center: c, rx: r, ry: r, stroke: color, fill: None, stroke_width: w });
+                        ops.push(Op::Ellipse {
+                            center: c,
+                            rx: r,
+                            ry: r,
+                            stroke: color,
+                            fill: None,
+                            stroke_width: w,
+                        });
                     } else {
                         let pts = arc_points_mils(c, r, a.start_angle, a.end_angle);
-                        ops.push(Op::Polyline { pts, width: w, color, closed: false, fill: None, fill_opacity: 1.0 });
+                        ops.push(Op::Polyline {
+                            pts,
+                            width: w,
+                            color,
+                            closed: false,
+                            fill: None,
+                            fill_opacity: 1.0,
+                        });
                     }
                 }
                 Prim::Pad(pad) => draw_pad(&mut b, &mut ops, pad, bg),
                 Prim::Via(v) => {
-                    let c = Point { x: v.x as f64 / U, y: v.y as f64 / U };
+                    let c = Point {
+                        x: v.x as f64 / U,
+                        y: v.y as f64 / U,
+                    };
                     let r = v.diameter as f64 / U / 2.0;
                     let hr = v.hole_size as f64 / U / 2.0;
                     b.add_circle(c.x, c.y, r);
-                    ops.push(Op::Ellipse { center: c, rx: r, ry: r, stroke: PCB_TOP.to_string(), fill: Some(PCB_TOP.to_string()), stroke_width: 0.0 });
+                    ops.push(Op::Ellipse {
+                        center: c,
+                        rx: r,
+                        ry: r,
+                        stroke: PCB_TOP.to_string(),
+                        fill: Some(PCB_TOP.to_string()),
+                        stroke_width: 0.0,
+                    });
                     if hr > 0.0 {
-                        ops.push(Op::Ellipse { center: c, rx: hr, ry: hr, stroke: bg.to_string(), fill: Some(bg.to_string()), stroke_width: 0.0 });
+                        ops.push(Op::Ellipse {
+                            center: c,
+                            rx: hr,
+                            ry: hr,
+                            stroke: bg.to_string(),
+                            fill: Some(bg.to_string()),
+                            stroke_width: 0.0,
+                        });
                     }
                 }
                 Prim::Fill(f) => {
@@ -372,7 +455,11 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                     if !reg.is_body && !pcb_render_layer(reg.layer, courtyard) {
                         continue;
                     }
-                    let color = if reg.is_body { PCB_BODY_STROKE.to_string() } else { pcb_layer_color(reg.layer, courtyard).to_string() };
+                    let color = if reg.is_body {
+                        PCB_BODY_STROKE.to_string()
+                    } else {
+                        pcb_layer_color(reg.layer, courtyard).to_string()
+                    };
                     let fill = if reg.is_body {
                         Some(PCB_BODY_FILL.to_string())
                     } else {
@@ -381,9 +468,21 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                     let opacity = if reg.is_body { 0.25 } else { 1.0 };
                     let pts = region_points(reg, &mut b);
                     if pts.len() >= 3 {
-                        ops.push(Op::Polyline { pts, width: 1.0, color, closed: true, fill, fill_opacity: opacity });
+                        ops.push(Op::Polyline {
+                            pts,
+                            width: 1.0,
+                            color,
+                            closed: true,
+                            fill,
+                            fill_opacity: opacity,
+                        });
                     } else if pts.len() == 2 {
-                        ops.push(Op::Line { p1: pts[0].clone(), p2: pts[1].clone(), width: 1.0, color });
+                        ops.push(Op::Line {
+                            p1: pts[0].clone(),
+                            p2: pts[1].clone(),
+                            width: 1.0,
+                            color,
+                        });
                     }
                 }
                 Prim::Text(t) => {
@@ -391,7 +490,10 @@ pub fn footprint_svg(fp: &pcblib::Footprint, courtyard: &[u8], bg: &str) -> Stri
                         continue;
                     }
                     let size = (t.height as f64 / U).max(2.0);
-                    let pos = Point { x: t.x as f64 / U, y: t.y as f64 / U };
+                    let pos = Point {
+                        x: t.x as f64 / U,
+                        y: t.y as f64 / U,
+                    };
                     let est = t.content.len() as f64 * size * 0.6;
                     b.add(pos.x - est, pos.y - size * 2.0);
                     b.add(pos.x + est, pos.y + size * 2.0);
@@ -424,7 +526,10 @@ fn draw_pad(b: &mut Bounds, ops: &mut Vec<Op>, p: &Pad, bg: &str) {
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let center = Point { x: p.x as f64 / U, y: p.y as f64 / U };
+    let center = Point {
+        x: p.x as f64 / U,
+        y: p.y as f64 / U,
+    };
     let r = (w.max(h)) / 2.0;
     b.add_circle(center.x, center.y, r);
 
@@ -458,9 +563,19 @@ fn draw_pad(b: &mut Bounds, ops: &mut Vec<Op>, p: &Pad, bg: &str) {
             let pts = raw
                 .iter()
                 .map(|(dx, dy)| rot_pt(*dx, *dy, -p.rotation))
-                .map(|(dx, dy)| Point { x: center.x + dx, y: center.y + dy })
+                .map(|(dx, dy)| Point {
+                    x: center.x + dx,
+                    y: center.y + dy,
+                })
                 .collect();
-            ops.push(Op::Polyline { pts, width: 1.0, color: color.clone(), closed: true, fill: Some(color), fill_opacity: 1.0 });
+            ops.push(Op::Polyline {
+                pts,
+                width: 1.0,
+                color: color.clone(),
+                closed: true,
+                fill: Some(color),
+                fill_opacity: 1.0,
+            });
         }
         pcblib::PAD_SHAPE_ROUNDED_RECTANGLE => {
             let rr = (w.min(h) * 0.25).min(w / 2.0).min(h / 2.0);
@@ -565,7 +680,10 @@ fn arc_points_mils(c: Point, r: f64, sa: f64, ea: f64) -> Vec<Point> {
     (0..=steps)
         .map(|i| {
             let a = (sa + span * i as f64 / steps as f64).to_radians();
-            Point { x: c.x + r * a.cos(), y: c.y + r * a.sin() }
+            Point {
+                x: c.x + r * a.cos(),
+                y: c.y + r * a.sin(),
+            }
         })
         .collect()
 }
@@ -576,19 +694,28 @@ fn region_points(reg: &pcblib::Region, b: &mut Bounds) -> Vec<Point> {
     let mut pts: Vec<Point> = Vec::new();
     for v in &reg.outline {
         b.add(scale(v.x), scale(v.y));
-        pts.push(Point { x: scale(v.x), y: scale(v.y) });
+        pts.push(Point {
+            x: scale(v.x),
+            y: scale(v.y),
+        });
     }
     // Flatten round segments between consecutive vertices.
     if reg.outline.iter().any(|v| v.round) {
         let mut flat: Vec<Point> = Vec::with_capacity(pts.len() * 4);
         for (i, v) in reg.outline.iter().enumerate() {
             if i == 0 {
-                flat.push(Point { x: scale(v.x), y: scale(v.y) });
+                flat.push(Point {
+                    x: scale(v.x),
+                    y: scale(v.y),
+                });
                 continue;
             }
             if v.round && v.radius > 0.0 {
                 let prev = reg.outline[i - 1];
-                let c = Point { x: scale(v.cx), y: scale(v.cy) };
+                let c = Point {
+                    x: scale(v.cx),
+                    y: scale(v.cy),
+                };
                 let r = scale(v.radius);
                 b.add_circle(c.x, c.y, r);
                 let a0 = deg_at(scale(prev.x), scale(prev.y), c.x, c.y);
@@ -610,16 +737,25 @@ fn region_points(reg: &pcblib::Region, b: &mut Bounds) -> Vec<Point> {
                     }
                 }
                 if delta.abs() > 355.0 || delta.abs() < 1e-6 {
-                    flat.push(Point { x: scale(v.x), y: scale(v.y) });
+                    flat.push(Point {
+                        x: scale(v.x),
+                        y: scale(v.y),
+                    });
                     continue;
                 }
                 let steps = ((delta.abs() / 10.0).ceil() as usize).clamp(2, 72);
                 for k in 1..=steps {
                     let ang = (a0 + delta * k as f64 / steps as f64).to_radians();
-                    flat.push(Point { x: c.x + r * ang.cos(), y: c.y + r * ang.sin() });
+                    flat.push(Point {
+                        x: c.x + r * ang.cos(),
+                        y: c.y + r * ang.sin(),
+                    });
                 }
             } else {
-                flat.push(Point { x: scale(v.x), y: scale(v.y) });
+                flat.push(Point {
+                    x: scale(v.x),
+                    y: scale(v.y),
+                });
             }
         }
         return flat;
@@ -713,27 +849,45 @@ fn draw_sch_prim(
 ) {
     let _ = part;
     match kind {
-        SchPrimKind::Polyline { points, width, color } => {
+        SchPrimKind::Polyline {
+            points,
+            width,
+            color,
+        } => {
             mark_points(b, points, 2.0);
             ops.push(Op::Polyline {
                 pts: points.clone(),
                 width: line_width(*width),
                 color: rgb(*color),
                 closed: false,
-                fill: None, fill_opacity: 1.0,
+                fill: None,
+                fill_opacity: 1.0,
             });
         }
-        SchPrimKind::Polygon { points, color, area_color, solid } => {
+        SchPrimKind::Polygon {
+            points,
+            color,
+            area_color,
+            solid,
+        } => {
             mark_points(b, points, 2.0);
             ops.push(Op::Polyline {
                 pts: points.clone(),
                 width: 1.0,
                 color: rgb(*color),
                 closed: true,
-                fill: solid.then(|| rgb(*area_color)), fill_opacity: 1.0,
+                fill: solid.then(|| rgb(*area_color)),
+                fill_opacity: 1.0,
             });
         }
-        SchPrimKind::Ellipse { center, radius_x, radius_y, color, area_color, solid } => {
+        SchPrimKind::Ellipse {
+            center,
+            radius_x,
+            radius_y,
+            color,
+            area_color,
+            solid,
+        } => {
             b.add_circle(center.x, center.y, radius_x.max(*radius_y));
             ops.push(Op::Ellipse {
                 center: center.clone(),
@@ -744,13 +898,23 @@ fn draw_sch_prim(
                 stroke_width: 10.0,
             });
         }
-        SchPrimKind::Pie { center, radius_x, radius_y, start_angle, end_angle, color, area_color, solid } => {
+        SchPrimKind::Pie {
+            center,
+            radius_x,
+            radius_y,
+            start_angle,
+            end_angle,
+            color,
+            area_color,
+            solid,
+        } => {
             b.add_circle(center.x, center.y, radius_x.max(*radius_y));
             // Flatten the pie outline.
             let mut pts = vec![center.clone()];
             let steps = (((end_angle - start_angle).abs() / 10.0).ceil() as usize).clamp(2, 72);
             for i in 0..=steps {
-                let a = (*start_angle + (*end_angle - *start_angle) * i as f64 / steps as f64).to_radians();
+                let a = (*start_angle + (*end_angle - *start_angle) * i as f64 / steps as f64)
+                    .to_radians();
                 pts.push(Point {
                     x: center.x + radius_x * a.cos(),
                     y: center.y + radius_y * a.sin(),
@@ -761,20 +925,36 @@ fn draw_sch_prim(
                 width: 1.0,
                 color: rgb(*color),
                 closed: true,
-                fill: solid.then(|| rgb(*area_color)), fill_opacity: 1.0,
+                fill: solid.then(|| rgb(*area_color)),
+                fill_opacity: 1.0,
             });
         }
-        SchPrimKind::RoundRect { p1, p2, corner, color, area_color, solid } => {
+        SchPrimKind::RoundRect {
+            p1,
+            p2,
+            corner,
+            color,
+            area_color,
+            solid,
+        } => {
             b.add(p1.x, p1.y);
             b.add(p2.x, p2.y);
             let w = (p1.x - p2.x).abs();
             let h = (p1.y - p2.y).abs();
             // Zero-width/height rects are not rendered by SVG; emit a line.
             if w < 0.01 || h < 0.01 {
-                ops.push(Op::Line { p1: p1.clone(), p2: p2.clone(), width: 10.0, color: rgb(*color) });
+                ops.push(Op::Line {
+                    p1: p1.clone(),
+                    p2: p2.clone(),
+                    width: 10.0,
+                    color: rgb(*color),
+                });
                 return;
             }
-            let center = Point { x: (p1.x + p2.x) / 2.0, y: (p1.y + p2.y) / 2.0 };
+            let center = Point {
+                x: (p1.x + p2.x) / 2.0,
+                y: (p1.y + p2.y) / 2.0,
+            };
             ops.push(Op::Rect {
                 center,
                 w,
@@ -785,7 +965,14 @@ fn draw_sch_prim(
                 fill: solid.then(|| rgb(*area_color)),
             });
         }
-        SchPrimKind::Arc { center, radius, start_angle, end_angle, width, color } => {
+        SchPrimKind::Arc {
+            center,
+            radius,
+            start_angle,
+            end_angle,
+            width,
+            color,
+        } => {
             b.add_circle(center.x, center.y, *radius);
             // Sweep is always counter-clockwise from start to end; wrap when
             // the end angle is smaller than the start.
@@ -828,7 +1015,10 @@ fn draw_sch_prim(
         SchPrimKind::Image { p1, p2 } => {
             b.add(p1.x, p1.y);
             b.add(p2.x, p2.y);
-            let center = Point { x: (p1.x + p2.x) / 2.0, y: (p1.y + p2.y) / 2.0 };
+            let center = Point {
+                x: (p1.x + p2.x) / 2.0,
+                y: (p1.y + p2.y) / 2.0,
+            };
             let w = (p1.x - p2.x).abs();
             let h = (p1.y - p2.y).abs();
             ops.push(Op::Rect {
@@ -841,7 +1031,15 @@ fn draw_sch_prim(
                 fill: Some("#F0F0F0".into()),
             });
         }
-        SchPrimKind::EllipticalArc { center, radius_x, radius_y, start_angle, end_angle, width, color } => {
+        SchPrimKind::EllipticalArc {
+            center,
+            radius_x,
+            radius_y,
+            start_angle,
+            end_angle,
+            width,
+            color,
+        } => {
             b.add_circle(center.x, center.y, radius_x.max(*radius_y));
             // Altium sweeps arcs counter-clockwise (increasing angle, wrapping),
             // not along the shortest signed delta.
@@ -864,10 +1062,15 @@ fn draw_sch_prim(
                 width: line_width(*width),
                 color: rgb(*color),
                 closed: false,
-                fill: None, fill_opacity: 1.0,
+                fill: None,
+                fill_opacity: 1.0,
             });
         }
-        SchPrimKind::Bezier { points, width, color } => {
+        SchPrimKind::Bezier {
+            points,
+            width,
+            color,
+        } => {
             mark_points(b, points, *width as f64);
             // Sample the cubic chain (points come in groups of control nodes).
             let sampled = sample_bezier(points);
@@ -876,10 +1079,17 @@ fn draw_sch_prim(
                 width: line_width(*width),
                 color: rgb(*color),
                 closed: false,
-                fill: None, fill_opacity: 1.0,
+                fill: None,
+                fill_opacity: 1.0,
             });
         }
-        SchPrimKind::Label { pos, text, color, font_id, orientation } => {
+        SchPrimKind::Label {
+            pos,
+            text,
+            color,
+            font_id,
+            orientation,
+        } => {
             if text.trim().is_empty() {
                 return;
             }
@@ -918,8 +1128,14 @@ fn sample_bezier(points: &[Point]) -> Vec<Point> {
     while idx + 3 < points.len() + 1 && idx + 2 < points.len() {
         let p0 = prev.clone();
         let c1 = points[idx].clone();
-        let c2 = points.get(idx + 1).cloned().unwrap_or_else(|| points.last().unwrap().clone());
-        let p3 = points.get(idx + 2).cloned().unwrap_or_else(|| points.last().unwrap().clone());
+        let c2 = points
+            .get(idx + 1)
+            .cloned()
+            .unwrap_or_else(|| points.last().unwrap().clone());
+        let p3 = points
+            .get(idx + 2)
+            .cloned()
+            .unwrap_or_else(|| points.last().unwrap().clone());
         for k in 1..=12 {
             let t = k as f64 / 12.0;
             out.push(bezier_point(&p0, &c1, &c2, &p3, t));
@@ -966,7 +1182,10 @@ fn draw_pin(pin: &sch::Pin, b: &mut Bounds, ops: &mut Vec<Op>) {
         2 => (-1.0, 0.0),
         _ => (0.0, -1.0),
     };
-    let hot = Point { x: pin.x + dx * pin.length, y: pin.y + dy * pin.length };
+    let hot = Point {
+        x: pin.x + dx * pin.length,
+        y: pin.y + dy * pin.length,
+    };
     let body = Point { x: pin.x, y: pin.y };
 
     b.add(body.x - 2.0, body.y - 2.0);
@@ -992,10 +1211,22 @@ fn draw_pin(pin: &sch::Pin, b: &mut Bounds, ops: &mut Vec<Op>) {
         // visually centered on it.
         let (pos, anchor) = if horizontal {
             let anchor: &'static str = if dx > 0.0 { "end" } else { "start" };
-            (Point { x: body.x - dx * 45.0, y: pin.y - PIN_TEXT_SIZE * 0.4 }, anchor)
+            (
+                Point {
+                    x: body.x - dx * 45.0,
+                    y: pin.y - PIN_TEXT_SIZE * 0.4,
+                },
+                anchor,
+            )
         } else {
             // Vertical pins: text to the left of the line, hugging the body.
-            (Point { x: pin.x - PIN_TEXT_SIZE * 0.65, y: body.y + dy * 25.0 }, "middle")
+            (
+                Point {
+                    x: pin.x - PIN_TEXT_SIZE * 0.65,
+                    y: body.y + dy * 25.0,
+                },
+                "middle",
+            )
         };
         b.add(pos.x - est, pos.y - PIN_TEXT_SIZE * 2.0);
         b.add(pos.x + est, pos.y + PIN_TEXT_SIZE * 2.0);
@@ -1016,9 +1247,21 @@ fn draw_pin(pin: &sch::Pin, b: &mut Bounds, ops: &mut Vec<Op>) {
         // vertical pins it goes left of the line near the hot-spot end.
         let (pos, anchor) = if horizontal {
             let anchor: &'static str = if dx > 0.0 { "start" } else { "end" };
-            (Point { x: body.x + dx * 80.0, y: pin.y + PIN_TEXT_SIZE * 0.12 }, anchor)
+            (
+                Point {
+                    x: body.x + dx * 80.0,
+                    y: pin.y + PIN_TEXT_SIZE * 0.12,
+                },
+                anchor,
+            )
         } else {
-            (Point { x: pin.x - PIN_TEXT_SIZE * 0.65, y: hot.y - dy * 25.0 }, "middle")
+            (
+                Point {
+                    x: pin.x - PIN_TEXT_SIZE * 0.65,
+                    y: hot.y - dy * 25.0,
+                },
+                "middle",
+            )
         };
         b.add(pos.x - est, pos.y - PIN_TEXT_SIZE * 2.0);
         b.add(pos.x + est, pos.y + PIN_TEXT_SIZE * 2.0);

@@ -53,7 +53,8 @@ pub fn rasterize_svg(svg: &str, max_w: u32, max_h: u32) -> Result<egui::ColorIma
     let scale = (max_w as f32 / sw).min(max_h as f32 / sh);
     let w = (sw * scale).round().max(1.0) as u32;
     let h = (sh * scale).round().max(1.0) as u32;
-    let mut pixmap = tiny_skia::Pixmap::new(w, h).ok_or_else(|| "Failed to allocate pixmap".to_string())?;
+    let mut pixmap =
+        tiny_skia::Pixmap::new(w, h).ok_or_else(|| "Failed to allocate pixmap".to_string())?;
     let transform = tiny_skia::Transform::from_scale(scale, scale);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     Ok(egui::ColorImage::from_rgba_premultiplied(

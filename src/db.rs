@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params, Result};
+use rusqlite::{params, Connection, Result};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -117,7 +117,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 }
 
 pub fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
-    let mut stmt = conn.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1")?;
+    let mut stmt =
+        conn.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1")?;
     let count: i64 = stmt.query_row(params![name], |row| row.get(0))?;
     Ok(count > 0)
 }
@@ -184,7 +185,12 @@ pub fn add_column(conn: &Connection, table_name: &str, column_name: &str) -> Res
     Ok(())
 }
 
-pub fn rename_column(conn: &Connection, table_name: &str, old_name: &str, new_name: &str) -> Result<()> {
+pub fn rename_column(
+    conn: &Connection,
+    table_name: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
     let safe = sanitize_table_name(table_name);
     let old = sanitize_table_name(old_name);
     let new = sanitize_table_name(new_name);
@@ -198,10 +204,7 @@ pub fn rename_column(conn: &Connection, table_name: &str, old_name: &str, new_na
 pub fn drop_column(conn: &Connection, table_name: &str, column_name: &str) -> Result<()> {
     let safe = sanitize_table_name(table_name);
     let col = sanitize_table_name(column_name);
-    conn.execute_batch(&format!(
-        "ALTER TABLE [{}] DROP COLUMN [{}];",
-        safe, col
-    ))?;
+    conn.execute_batch(&format!("ALTER TABLE [{}] DROP COLUMN [{}];", safe, col))?;
     Ok(())
 }
 
@@ -244,7 +247,8 @@ fn component_from_row(row: &rusqlite::Row) -> Result<Component> {
     })
 }
 
-const COMPONENT_SELECT: &str = "SELECT id, MPN, Manufacturer, Description, Verified, [Library Ref], [Library Path], \
+const COMPONENT_SELECT: &str =
+    "SELECT id, MPN, Manufacturer, Description, Verified, [Library Ref], [Library Path], \
     [Footprint Ref], [Footprint Path], [Footprint Ref 2], [Footprint Path 2], \
     [Footprint Ref 3], [Footprint Path 3], \
     [ComponentLink1Description], [ComponentLink1URL], \
@@ -253,15 +257,16 @@ const COMPONENT_SELECT: &str = "SELECT id, MPN, Manufacturer, Description, Verif
 
 pub fn get_components(conn: &Connection, table_name: &str) -> Result<Vec<Component>> {
     let safe = sanitize_table_name(table_name);
-    let mut stmt = conn.prepare(&format!(
-        "{}{}] ORDER BY MPN",
-        COMPONENT_SELECT, safe
-    ))?;
+    let mut stmt = conn.prepare(&format!("{}{}] ORDER BY MPN", COMPONENT_SELECT, safe))?;
     let rows = stmt.query_map([], component_from_row)?;
     rows.collect()
 }
 
-pub fn get_distinct_values(conn: &Connection, table_name: &str, column: &str) -> Result<Vec<String>> {
+pub fn get_distinct_values(
+    conn: &Connection,
+    table_name: &str,
+    column: &str,
+) -> Result<Vec<String>> {
     let safe = sanitize_table_name(table_name);
     let col = sanitize_table_name(column);
     let mut stmt = conn.prepare(&format!(
@@ -295,17 +300,17 @@ pub fn search_components(
     }
     sql.push_str(" ORDER BY MPN");
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), component_from_row)?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(params.iter()),
+        component_from_row,
+    )?;
     rows.collect()
 }
 
 /// Search every category table for components whose `MPN` contains `query`
 /// (case-insensitive substring match). Returns matches paired with their
 /// source table name so the caller can tell which category each came from.
-pub fn search_all_by_mpn(
-    conn: &Connection,
-    query: &str,
-) -> Result<Vec<(String, Component)>> {
+pub fn search_all_by_mpn(conn: &Connection, query: &str) -> Result<Vec<(String, Component)>> {
     let mut out: Vec<(String, Component)> = Vec::new();
     let query = query.trim();
     if query.is_empty() {
@@ -324,9 +329,7 @@ pub fn search_all_by_mpn(
     let pattern = format!("%{}%", escaped);
     for table in tables {
         let safe = sanitize_table_name(&table);
-        let sql = format!(
-            "{COMPONENT_SELECT}{safe}] WHERE MPN LIKE ?1 ESCAPE '\\' ORDER BY MPN"
-        );
+        let sql = format!("{COMPONENT_SELECT}{safe}] WHERE MPN LIKE ?1 ESCAPE '\\' ORDER BY MPN");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![pattern], component_from_row)?;
         for r in rows {
@@ -453,7 +456,10 @@ pub fn update_component(conn: &Connection, table_name: &str, c: &Component) -> R
 
 pub fn delete_component(conn: &Connection, table_name: &str, id: &str) -> Result<()> {
     let safe = sanitize_table_name(table_name);
-    conn.execute(&format!("DELETE FROM [{}] WHERE id = ?1", safe), params![id.parse::<i64>().unwrap_or(0)])?;
+    conn.execute(
+        &format!("DELETE FROM [{}] WHERE id = ?1", safe),
+        params![id.parse::<i64>().unwrap_or(0)],
+    )?;
     Ok(())
 }
 
@@ -510,17 +516,27 @@ pub fn clone_table(conn: &Connection, old_name: &str, new_name: &str) -> Result<
 
 // --- Custom field values ---
 
-pub fn get_custom_value(conn: &Connection, table_name: &str, component_id: &str, column: &str) -> Result<String> {
+pub fn get_custom_value(
+    conn: &Connection,
+    table_name: &str,
+    component_id: &str,
+    column: &str,
+) -> Result<String> {
     let safe = sanitize_table_name(table_name);
     let col = sanitize_table_name(column);
-    let mut stmt = conn.prepare(&format!(
-        "SELECT [{}] FROM [{}] WHERE id = ?1",
-        col, safe
-    ))?;
-    stmt.query_row(params![component_id.parse::<i64>().unwrap_or(0)], |row| row.get(0))
+    let mut stmt = conn.prepare(&format!("SELECT [{}] FROM [{}] WHERE id = ?1", col, safe))?;
+    stmt.query_row(params![component_id.parse::<i64>().unwrap_or(0)], |row| {
+        row.get(0)
+    })
 }
 
-pub fn set_custom_value(conn: &Connection, table_name: &str, component_id: &str, column: &str, value: &str) -> Result<()> {
+pub fn set_custom_value(
+    conn: &Connection,
+    table_name: &str,
+    component_id: &str,
+    column: &str,
+    value: &str,
+) -> Result<()> {
     let safe = sanitize_table_name(table_name);
     let col = sanitize_table_name(column);
     conn.execute(
@@ -531,7 +547,15 @@ pub fn set_custom_value(conn: &Connection, table_name: &str, component_id: &str,
 }
 
 fn sanitize_table_name(name: &str) -> String {
-    name.chars().map(|c| if c == ';' || c == '\'' || c == '"' { '_' } else { c }).collect()
+    name.chars()
+        .map(|c| {
+            if c == ';' || c == '\'' || c == '"' {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -557,8 +581,9 @@ mod tests {
                 [Schematic Only] TEXT NOT NULL DEFAULT '0',
                 [No Sim] TEXT NOT NULL DEFAULT '0',
                 [Manufacturer Part Number] TEXT NOT NULL DEFAULT ''
-            );"
-        ).unwrap();
+            );",
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO [Test] ([Design Item ID], Manufacturer, Datasheet) VALUES ('ABC', 'Acme', 'http://x')",
             [],
@@ -592,9 +617,33 @@ mod tests {
         for t in ["Resistors", "Capacitors"] {
             ensure_table(&conn, t).unwrap();
         }
-        add_component(&conn, "Resistors", &Component { mpn: "R100".into(), ..Default::default() }).unwrap();
-        add_component(&conn, "Capacitors", &Component { mpn: "C100".into(), ..Default::default() }).unwrap();
-        add_component(&conn, "Capacitors", &Component { mpn: "C200".into(), ..Default::default() }).unwrap();
+        add_component(
+            &conn,
+            "Resistors",
+            &Component {
+                mpn: "R100".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component(
+            &conn,
+            "Capacitors",
+            &Component {
+                mpn: "C100".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component(
+            &conn,
+            "Capacitors",
+            &Component {
+                mpn: "C200".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let all = search_all_by_mpn(&conn, "100").unwrap();
         let mpns: Vec<&str> = all.iter().map(|(_, c)| c.mpn.as_str()).collect();

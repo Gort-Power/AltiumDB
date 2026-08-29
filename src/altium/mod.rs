@@ -71,10 +71,26 @@ mod tests {
         let lib = pcblib::open(p).unwrap();
         assert_eq!(lib.footprints.len(), 1);
         let fp = &lib.footprints[0];
-        let pads = fp.prims.iter().filter(|p| matches!(p, Prim::Pad(_))).count();
-        let tracks = fp.prims.iter().filter(|p| matches!(p, Prim::Track(_))).count();
-        let arcs = fp.prims.iter().filter(|p| matches!(p, Prim::Arc(_))).count();
-        let bodies = fp.prims.iter().filter(|p| matches!(p, Prim::Region(r) if r.is_body)).count();
+        let pads = fp
+            .prims
+            .iter()
+            .filter(|p| matches!(p, Prim::Pad(_)))
+            .count();
+        let tracks = fp
+            .prims
+            .iter()
+            .filter(|p| matches!(p, Prim::Track(_)))
+            .count();
+        let arcs = fp
+            .prims
+            .iter()
+            .filter(|p| matches!(p, Prim::Arc(_)))
+            .count();
+        let bodies = fp
+            .prims
+            .iter()
+            .filter(|p| matches!(p, Prim::Region(r) if r.is_body))
+            .count();
         assert_eq!((pads, tracks, arcs, bodies), (3, 20, 2, 1));
         // First pad position: (-41.73, 37.4) mil.
         match fp.prims.iter().find(|p| matches!(p, Prim::Pad(_))) {
@@ -91,19 +107,26 @@ mod tests {
         let Ok(text) = std::fs::read_to_string("target/ref_counts.json") else {
             return; // Reference not generated; skip.
         };
-        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text) else {
+        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text)
+        else {
             return;
         };
         let mut failures = Vec::new();
         for (name, expected) in &map {
-            let dir = if name.ends_with(".PcbLib") { "footprints" } else { "symbols" };
+            let dir = if name.ends_with(".PcbLib") {
+                "footprints"
+            } else {
+                "symbols"
+            };
             let path = Path::new(dir).join(name);
 
             if name.ends_with(".PcbLib") {
-                let want_all: i64 = ["pads", "tracks", "arcs", "texts", "fills", "regions", "bodies", "vias"]
-                    .iter()
-                    .map(|k| expected[*k].as_i64().unwrap_or(0))
-                    .sum();
+                let want_all: i64 = [
+                    "pads", "tracks", "arcs", "texts", "fills", "regions", "bodies", "vias",
+                ]
+                .iter()
+                .map(|k| expected[*k].as_i64().unwrap_or(0))
+                .sum();
                 if want_all == 0 {
                     continue; // Python failed to parse this file at all.
                 }
@@ -115,9 +138,8 @@ mod tests {
                     failures.push(format!("{name}: no footprints"));
                     continue;
                 };
-                let c = |pred: fn(&Prim) -> bool| {
-                    fp.prims.iter().filter(|p| pred(p)).count() as i64
-                };
+                let c =
+                    |pred: fn(&Prim) -> bool| fp.prims.iter().filter(|p| pred(p)).count() as i64;
                 let got = [
                     ("pads", c(|p| matches!(p, Prim::Pad(_)))),
                     ("tracks", c(|p| matches!(p, Prim::Track(_)))),
@@ -145,15 +167,26 @@ mod tests {
                 };
                 let want_pins = expected["pins"].as_i64().unwrap_or(0);
                 if (sym.pins.len() as i64) != want_pins {
-                    failures.push(format!("{name}: pins got {}, want {want_pins}", sym.pins.len()));
+                    failures.push(format!(
+                        "{name}: pins got {}, want {want_pins}",
+                        sym.pins.len()
+                    ));
                 }
                 let want_gfx = expected["graphics"].as_i64().unwrap_or(0);
                 if (sym.prims.len() as i64) < want_gfx {
-                    failures.push(format!("{name}: graphics got {}, want >= {want_gfx}", sym.prims.len()));
+                    failures.push(format!(
+                        "{name}: graphics got {}, want >= {want_gfx}",
+                        sym.prims.len()
+                    ));
                 }
             }
         }
-        assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+        assert!(
+            failures.is_empty(),
+            "{} mismatches:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
     }
 
     #[test]
@@ -184,7 +217,9 @@ mod tests {
             if !path.exists() {
                 continue;
             }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
             let svg = if file.ends_with("Schlib") {
                 symbol_svg(path, "", "#FFFFFF")
             } else {
@@ -220,11 +255,16 @@ mod tests {
                 if p.extension().and_then(|x| x.to_str()) != Some("svg") {
                     continue;
                 }
-                let Ok(svg) = std::fs::read_to_string(&p) else { continue };
-                let Ok(img) = crate::render::rasterize_svg(&svg, 640, 480) else { continue };
+                let Ok(svg) = std::fs::read_to_string(&p) else {
+                    continue;
+                };
+                let Ok(img) = crate::render::rasterize_svg(&svg, 640, 480) else {
+                    continue;
+                };
                 let mut rgba = img.clone();
                 for px in rgba.pixels.iter_mut() {
-                    *px = eframe::egui::Color32::from_rgba_unmultiplied(px.r(), px.g(), px.b(), 255);
+                    *px =
+                        eframe::egui::Color32::from_rgba_unmultiplied(px.r(), px.g(), px.b(), 255);
                 }
                 let stem = p.file_stem().unwrap().to_string_lossy().to_string();
                 let png_path = out_dir.join(format!("{stem}_py.png"));
@@ -250,8 +290,14 @@ mod tests {
         if sym.exists() {
             let svg = symbol_svg(sym, "", "#1E1E1E").unwrap();
             assert!(svg.contains("fill=\"#1E1E1E\""), "dark background expected");
-            assert!(svg.contains("#E8E8E8"), "black ink should become light on dark bg");
-            assert!(!svg.contains("#000000"), "no black ink should remain on dark bg");
+            assert!(
+                svg.contains("#E8E8E8"),
+                "black ink should become light on dark bg"
+            );
+            assert!(
+                !svg.contains("#000000"),
+                "no black ink should remain on dark bg"
+            );
         }
         let fp = std::path::Path::new("footprints/Planar ER23.PcbLib");
         if fp.exists() {
@@ -265,14 +311,19 @@ mod tests {
         let sym = std::path::Path::new("symbols/0402 RES_1.Schlib");
         if sym.exists() {
             let svg = symbol_svg(sym, "", "#FFFFFF").unwrap();
-            assert!(svg.contains("fill=\"#FFFFFF\""), "white background expected");
+            assert!(
+                svg.contains("fill=\"#FFFFFF\""),
+                "white background expected"
+            );
         }
     }
 
     #[test]
     fn renders_all_test_libraries() {
         for dir in ["symbols", "footprints"] {
-            let Ok(entries) = std::fs::read_dir(dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
             for e in entries.flatten() {
                 let path = e.path();
                 let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("");
@@ -295,7 +346,9 @@ mod tests {
         for name in ["TO-277", "Planar ER23", "ONSC-WDFN-8-511AB_V"] {
             let path_str = format!("footprints/{name}.PcbLib");
             let p = std::path::Path::new(&path_str);
-            if !p.exists() { continue; }
+            if !p.exists() {
+                continue;
+            }
             let svg = footprint_svg(p, "", "#1E1E1E").unwrap();
             std::fs::write(format!("target/probe_{name}_dark.svg"), &svg).unwrap();
             // White is allowed only for small pad designator <text>; filled
