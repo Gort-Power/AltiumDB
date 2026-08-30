@@ -57,9 +57,7 @@ fn fetch_latest() -> Result<ReleaseInfo, String> {
         .set("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| format!("network: {}", e))?;
-    let release: GithubRelease = resp
-        .into_json()
-        .map_err(|e| format!("json: {}", e))?;
+    let release: GithubRelease = resp.into_json().map_err(|e| format!("json: {}", e))?;
     let tag = release.tag_name.trim();
     let version = tag.strip_prefix('v').unwrap_or(tag).to_string();
     let name = release.name.unwrap_or_else(|| tag.to_string());
@@ -74,7 +72,10 @@ fn fetch_latest() -> Result<ReleaseInfo, String> {
 /// Returns `true` when `remote` is a higher semantic version than `local`.
 /// Non-parseable versions are treated as equal (no update shown).
 fn is_newer(remote: &str, local: &str) -> bool {
-    match (semver::Version::parse(remote), semver::Version::parse(local)) {
+    match (
+        semver::Version::parse(remote),
+        semver::Version::parse(local),
+    ) {
         (Ok(r), Ok(l)) => r > l,
         _ => false,
     }
