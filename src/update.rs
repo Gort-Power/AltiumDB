@@ -9,8 +9,6 @@ pub type SharedRelease = Arc<Mutex<Option<ReleaseInfo>>>;
 pub struct ReleaseInfo {
     /// Release tag without a leading `v` (e.g. `1.2.3`).
     pub version: String,
-    /// Raw release tag as published on GitHub (e.g. `v1.2.3`).
-    pub tag: String,
     /// Release title (falls back to the tag when empty).
     pub name: String,
     /// Browser URL to the release page.
@@ -63,7 +61,6 @@ fn fetch_latest() -> Result<ReleaseInfo, String> {
     let name = release.name.unwrap_or_else(|| tag.to_string());
     Ok(ReleaseInfo {
         version,
-        tag: tag.to_string(),
         name,
         url: release.html_url,
     })
