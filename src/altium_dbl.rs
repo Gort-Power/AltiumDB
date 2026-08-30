@@ -498,4 +498,17 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn canonical_ini_roundtrips_unchanged() {
+        // A file already produced by this tool must round-trip byte-for-byte, so
+        // repeated saves do not touch the file.
+        let mut dbl = AltiumDbl::new(Path::new("test.sqlite"));
+        dbl.add_library(create_library("Resistors"));
+        dbl.set_dsn("gortpower");
+        dbl.ensure_base_fields();
+        let canonical = dbl.to_ini();
+        let reparsed = AltiumDbl::from_ini(&canonical).unwrap();
+        assert_eq!(canonical, reparsed.to_ini());
+    }
 }

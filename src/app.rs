@@ -428,7 +428,9 @@ impl AltiumDbApp {
         app.sync_dbl_fields_with_db();
         app.sync_libraries_with_db();
         app.refresh_categories();
-        app.save_dbl();
+        if !app.dbl_path.exists() {
+            app.save_dbl();
+        }
         app
     }
 
