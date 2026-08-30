@@ -152,7 +152,14 @@ impl AltiumDbl {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        std::fs::write(path, self.to_ini()).map_err(|e| e.to_string())
+        let content = self.to_ini();
+        if std::fs::read_to_string(path)
+            .map(|existing| existing == content)
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        std::fs::write(path, content).map_err(|e| e.to_string())
     }
 
     pub fn set_connection_string(&mut self, cs: String) {
@@ -469,5 +476,26 @@ mod tests {
         assert!(!out.contains("sqlite_sequence"));
         assert!(out.contains("Enabled=False"));
         assert!(out.contains("LibrarySearchPath=C:\\libs\\symbols;C:\\libs\\footprints"));
+    }
+
+    #[test]
+    fn save_does_not_rewrite_unchanged_file() {
+        let dir = std::env::temp_dir().join("altiumdb_dbl_test");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("altiumdb.DbLib");
+
+        let mut dbl = AltiumDbl::new(Path::new("test.sqlite"));
+        dbl.add_library(create_library("Resistors"));
+        dbl.ensure_base_fields();
+        dbl.save(&path).unwrap();
+
+        let modified_after_first = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        dbl.save(&path).unwrap();
+        let modified_after_second = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap();
+        assert_eq!(modified_after_first, modified_after_second);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
