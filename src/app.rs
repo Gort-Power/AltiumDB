@@ -1046,9 +1046,9 @@ impl eframe::App for AltiumDbApp {
         self.adapt_viewport(ctx);
 
         if self.new_release.is_none() && !self.update_dismissed {
-            if let Ok(guard) = self.update_checker.lock() {
-                if guard.is_some() {
-                    self.new_release = guard.clone();
+            if let Ok(mut guard) = self.update_checker.lock() {
+                if let Some(info) = guard.take() {
+                    self.new_release = Some(info);
                 }
             }
         }
