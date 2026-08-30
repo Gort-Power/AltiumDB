@@ -1859,12 +1859,15 @@ impl eframe::App for AltiumDbApp {
                             egui::ScrollArea::vertical()
                                 .id_salt("search_results_scroll")
                                 .show(ui, |ui| {
-                                    for (_cat, comp) in &self.search_results {
-                                        let is_selected = selected == Some(comp.id.clone());
-                                        let response =
-                                            ui.selectable_label(is_selected, comp.mpn.clone());
+                                    for (cat, comp) in &self.search_results {
+                                        let select_key = format!("{}|{}", cat, comp.id);
+                                        let is_selected = selected == Some(select_key.clone());
+                                        let response = ui.selectable_label(
+                                            is_selected,
+                                            egui::RichText::new(format!("{}\n{}", comp.mpn, cat)),
+                                        );
                                         if response.clicked() {
-                                            to_select = Some(comp.id.clone());
+                                            to_select = Some(select_key);
                                         }
                                         if response.double_clicked() {
                                             to_copy = Some(comp.mpn.clone());
@@ -1884,7 +1887,9 @@ impl eframe::App for AltiumDbApp {
                     let found = self
                         .search_results
                         .iter()
-                        .find(|(_, comp)| self.search_selected.as_ref() == Some(&comp.id))
+                        .find(|(cat, comp)| {
+                            self.search_selected.as_ref() == Some(&format!("{}|{}", cat, comp.id))
+                        })
                         .cloned();
                     if let Some((cat, comp)) = found {
                         ui.horizontal(|ui| {
@@ -1894,6 +1899,7 @@ impl eframe::App for AltiumDbApp {
                                 self.set_status(format!("MPN copied: {}", comp.mpn));
                             }
                         });
+                        ui.label(egui::RichText::new(format!("Category: {}", cat)).weak());
                         ui.separator();
 
                         let mut detail_rows: Vec<(String, String)> = Vec::new();
