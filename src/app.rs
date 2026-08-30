@@ -62,6 +62,14 @@ struct ConfigData {
     symbols_folder: String,
     #[serde(default)]
     footprints_folder: String,
+    /// Minutes to wait before reminding about an available update again
+    /// after the user dismissed it with "Remind me later".
+    #[serde(default = "default_remind_minutes")]
+    remind_after_minutes: u64,
+}
+
+fn default_remind_minutes() -> u64 {
+    30
 }
 
 #[derive(Clone, Debug)]
@@ -151,8 +159,11 @@ pub struct AltiumDbApp {
     search_selected: Option<String>,
 
     update_checker: crate::update::SharedRelease,
-    new_release: Option<crate::update::ReleaseInfo>,
+    release: Option<crate::update::ReleaseInfo>,
     update_dismissed: bool,
+    remind_at: Option<std::time::Instant>,
+    remind_timeout: std::time::Duration,
+    settings_remind_minutes: u64,
 }
 
 fn unique_name(base: &str, exists: impl Fn(&str) -> bool) -> String {
@@ -339,6 +350,7 @@ impl AltiumDbApp {
         let theme = cfg.theme;
         let settings_symbols_folder = cfg.symbols_folder;
         let settings_footprints_folder = cfg.footprints_folder;
+        let remind_minutes = cfg.remind_after_minutes.clamp(1, 1440);
 
         let mut dbl = if dbl_path.exists() {
             altium_dbl::AltiumDbl::load(&dbl_path, &db_path, &config_dsn)
@@ -422,8 +434,11 @@ impl AltiumDbApp {
             search_results: Vec::new(),
             search_selected: None,
             update_checker: crate::update::spawn_check(),
-            new_release: None,
+            release: None,
             update_dismissed: false,
+            remind_at: None,
+            remind_timeout: std::time::Duration::from_secs(remind_minutes * 60),
+            settings_remind_minutes: remind_minutes,
         };
         app.sync_dbl_fields_with_db();
         app.sync_libraries_with_db();
@@ -872,6 +887,7 @@ impl AltiumDbApp {
             dsn: self.settings_dsn.clone(),
             symbols_folder: self.settings_symbols_folder.clone(),
             footprints_folder: self.settings_footprints_folder.clone(),
+            remind_after_minutes: self.settings_remind_minutes,
         };
         if let Ok(data) = serde_json::to_string_pretty(&cfg) {
             let _ = std::fs::write(&self.config_path, data);
@@ -1045,10 +1061,11 @@ impl eframe::App for AltiumDbApp {
         self.apply_theme(ctx);
         self.adapt_viewport(ctx);
 
-        if self.new_release.is_none() && !self.update_dismissed {
+        if self.release.is_none() && !self.update_dismissed {
             if let Ok(mut guard) = self.update_checker.lock() {
                 if let Some(info) = guard.take() {
-                    self.new_release = Some(info);
+                    self.release = Some(info);
+                    self.remind_at = None;
                 }
             }
         }
@@ -1200,8 +1217,22 @@ impl eframe::App for AltiumDbApp {
                 });
 
                 ui.separator();
+                ui.heading("Updates");
+                ui.horizontal(|ui| {
+                    ui.label("Remind me about updates after (minutes):");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings_remind_minutes)
+                            .range(1..=1440)
+                            .speed(1.0),
+                    );
+                });
+
+                ui.separator();
                 if ui.button("Save").clicked() {
                     save_clicked = true;
+                    self.remind_timeout = std::time::Duration::from_secs(
+                        self.settings_remind_minutes.clamp(1, 1440) * 60,
+                    );
                     self.reopen_database();
                     self.save_config_data();
                     self.set_status("Settings saved");
@@ -1244,7 +1275,13 @@ impl eframe::App for AltiumDbApp {
             }
         }
 
-        if let Some(release) = self.new_release.clone() {
+        let show_update = self.release.is_some()
+            && !self.update_dismissed
+            && self
+                .remind_at
+                .is_none_or(|t| std::time::Instant::now() >= t);
+        if show_update {
+            let release = self.release.clone().unwrap();
             let mut open = true;
             egui::Window::new("Update available")
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -1267,19 +1304,21 @@ impl eframe::App for AltiumDbApp {
                                 url: release.url.clone(),
                                 new_tab: true,
                             });
-                            self.new_release = None;
+                            self.update_dismissed = true;
+                            self.release = None;
                         }
                         if ui.button("Remind me later").clicked() {
-                            self.new_release = None;
+                            self.remind_at = Some(std::time::Instant::now() + self.remind_timeout);
                         }
                         if ui.button("Skip this version").clicked() {
                             self.update_dismissed = true;
-                            self.new_release = None;
+                            self.release = None;
                         }
                     });
                 });
+            // Window closed via its [X] button: remind again after the timeout.
             if !open {
-                self.new_release = None;
+                self.remind_at = Some(std::time::Instant::now() + self.remind_timeout);
             }
         }
 
