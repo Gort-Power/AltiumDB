@@ -1131,6 +1131,7 @@ impl eframe::App for AltiumDbApp {
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
+                        db::checkpoint(&self.conn);
                         std::process::exit(0);
                     }
                 });
@@ -2841,6 +2842,12 @@ impl eframe::App for AltiumDbApp {
                 self.fields_editor_open = false;
             }
         }
+    }
+}
+
+impl Drop for AltiumDbApp {
+    fn drop(&mut self) {
+        db::checkpoint(&self.conn);
     }
 }
 

@@ -51,6 +51,12 @@ pub fn open_database(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Flushes the WAL journal into the main database file so that changes become
+/// visible in the `.sqlite` file itself (useful for backups / file sync).
+pub fn checkpoint(conn: &Connection) {
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+}
+
 pub fn ensure_base_columns(conn: &Connection, table: &str) -> Result<()> {
     let cols = get_columns(conn, table)?;
     for col in [
