@@ -488,6 +488,39 @@ impl AltiumDbApp {
         }
     }
 
+    /// Switches to the Fill (edit) mode and opens the given component for
+    /// editing in its category. Used from parametric search results.
+    fn open_component_in_fill(&mut self, cat: &str, comp: &db::Component) {
+        self.mode = AppMode::Fill;
+        self.selected_category = Some(cat.to_string());
+        self.refresh_components();
+
+        let comp_id = comp.id.clone();
+        self.selected_component_id = Some(comp_id);
+        self.editing_component = Some(comp.id.clone());
+        self.component_input = comp.mpn.clone();
+        self.mpn_input = comp.mpn.clone();
+        self.manufacturer_input = comp.manufacturer.clone();
+        self.verified_input = comp.verified;
+        self.library_ref_input = comp.library_ref.clone();
+        self.footprint_ref_input = comp.footprint_ref.clone();
+        self.library_path_input = comp.library_path.clone();
+        self.footprint_path_input = comp.footprint_path.clone();
+        self.footprint_ref2_input = comp.footprint_ref2.clone();
+        self.footprint_path2_input = comp.footprint_path2.clone();
+        self.footprint_ref3_input = comp.footprint_ref3.clone();
+        self.footprint_path3_input = comp.footprint_path3.clone();
+        self.description_input = comp.description.clone();
+        self.component_link1_description_input = comp.component_link1_description.clone();
+        self.component_link1_url_input = comp.component_link1_url.clone();
+        self.component_link2_description_input = comp.component_link2_description.clone();
+        self.component_link2_url_input = comp.component_link2_url.clone();
+        self.component_link3_description_input = comp.component_link3_description.clone();
+        self.component_link3_url_input = comp.component_link3_url.clone();
+        self.refresh_custom_values();
+        self.set_status(format!("Editing {} in '{}'", comp.mpn, cat));
+    }
+
     fn search_param_columns(&self, cat: &str) -> Vec<(String, String)> {
         let excluded = ["id", "MPN", "Verified"];
         let cols = db::get_columns(&self.conn, cat).unwrap_or_default();
@@ -1897,6 +1930,9 @@ impl eframe::App for AltiumDbApp {
                             if ui.button("Copy ID").clicked() {
                                 ui.ctx().copy_text(comp.mpn.clone());
                                 self.set_status(format!("MPN copied: {}", comp.mpn));
+                            }
+                            if ui.button("Edit").clicked() {
+                                self.open_component_in_fill(&cat, &comp);
                             }
                         });
                         ui.label(egui::RichText::new(format!("Category: {}", cat)).weak());
