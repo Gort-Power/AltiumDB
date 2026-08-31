@@ -80,7 +80,7 @@ struct CategoryInfo {
 }
 
 pub struct AltiumDbApp {
-    conn: Connection,
+    conn: Option<Connection>,
     db_path: PathBuf,
     dbl_path: PathBuf,
     config_path: PathBuf,
@@ -339,6 +339,10 @@ fn mode_label(modes: &[(u8, &'static str)], v: u8) -> &'static str {
 }
 
 impl AltiumDbApp {
+    fn conn(&self) -> &Connection {
+        self.conn.as_ref().expect("database connection")
+    }
+
     pub fn new(
         conn: Connection,
         db_path: PathBuf,
@@ -365,7 +369,7 @@ impl AltiumDbApp {
         dbl.ensure_base_fields();
 
         let mut app = Self {
-            conn,
+            conn: Some(conn),
             db_path: db_path.clone(),
             dbl_path: dbl_path.clone(),
             config_path: config_path.clone(),
@@ -463,9 +467,9 @@ impl AltiumDbApp {
 
     fn refresh_components(&mut self) {
         if let Some(ref cat) = self.selected_category {
-            db::ensure_table(&self.conn, cat).ok();
-            self.components = db::get_components(&self.conn, cat).unwrap_or_default();
-            self.custom_columns = db::get_columns(&self.conn, cat)
+            db::ensure_table(self.conn(), cat).ok();
+            self.components = db::get_components(self.conn(), cat).unwrap_or_default();
+            self.custom_columns = db::get_columns(self.conn(), cat)
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|c| c != "id" && !db::BASE_COLUMNS.contains(&c.as_str()))
@@ -482,7 +486,7 @@ impl AltiumDbApp {
             (&self.selected_category, self.selected_component_id.clone())
         {
             for col in &self.custom_columns {
-                let val = db::get_custom_value(&self.conn, cat, &comp_id, col).unwrap_or_default();
+                let val = db::get_custom_value(self.conn(), cat, &comp_id, col).unwrap_or_default();
                 self.custom_values.push((col.clone(), val));
             }
         }
@@ -523,7 +527,7 @@ impl AltiumDbApp {
 
     fn search_param_columns(&self, cat: &str) -> Vec<(String, String)> {
         let excluded = ["id", "MPN", "Verified"];
-        let cols = db::get_columns(&self.conn, cat).unwrap_or_default();
+        let cols = db::get_columns(self.conn(), cat).unwrap_or_default();
         cols.into_iter()
             .filter(|c| !excluded.contains(&c.as_str()))
             .map(|c| {
@@ -549,7 +553,7 @@ impl AltiumDbApp {
     fn refresh_search(&mut self) {
         if let Some(ref cat) = self.search_category {
             self.search_results =
-                db::search_components(&self.conn, cat, &self.selected_search_filters())
+                db::search_components(self.conn(), cat, &self.selected_search_filters())
                     .unwrap_or_default()
                     .into_iter()
                     .map(|c| (cat.clone(), c))
@@ -559,7 +563,7 @@ impl AltiumDbApp {
             if q.is_empty() {
                 self.search_results.clear();
             } else {
-                self.search_results = db::search_all_by_mpn(&self.conn, q).unwrap_or_default();
+                self.search_results = db::search_all_by_mpn(self.conn(), q).unwrap_or_default();
             }
         } else {
             self.search_results.clear();
@@ -578,7 +582,7 @@ impl AltiumDbApp {
                 .search_param_columns(cat)
                 .into_iter()
                 .map(|(column, name)| SearchParam {
-                    values: db::get_distinct_values(&self.conn, cat, &column).unwrap_or_default(),
+                    values: db::get_distinct_values(self.conn(), cat, &column).unwrap_or_default(),
                     column,
                     name,
                     selected: Vec::new(),
@@ -630,13 +634,14 @@ impl AltiumDbApp {
                 _ => String::new(),
             }
         } else {
-            db::get_custom_value(&self.conn, cat, &comp.id, column).unwrap_or_default()
+            db::get_custom_value(self.conn(), cat, &comp.id, column).unwrap_or_default()
         }
     }
 
     fn sync_dbl_fields_with_db(&mut self) {
+        let conn = self.conn.as_ref().expect("database connection");
         for lib in &mut self.dbl.libraries {
-            let Ok(cols) = db::get_columns(&self.conn, &lib.table) else {
+            let Ok(cols) = db::get_columns(conn, &lib.table) else {
                 continue;
             };
             lib.fields.retain(|f| cols.contains(&f.column));
@@ -660,7 +665,7 @@ impl AltiumDbApp {
     }
 
     fn sync_libraries_with_db(&mut self) {
-        if let Ok(tables) = db::get_tables(&self.conn) {
+        if let Ok(tables) = db::get_tables(self.conn()) {
             for table in tables {
                 if self.dbl.find_library(&table).is_none() {
                     self.dbl.add_library(altium_dbl::create_library(&table));
@@ -686,7 +691,7 @@ impl AltiumDbApp {
                     dbl.set_dsn(&dsn);
                 }
                 dbl.ensure_base_fields();
-                self.conn = conn;
+                self.conn = Some(conn);
                 self.db_path = db_path;
                 self.dbl_path = dbl_path;
                 self.dbl = dbl;
@@ -768,16 +773,16 @@ impl AltiumDbApp {
                 .get("Category")
                 .map(|v| v.trim().to_string())
                 .unwrap_or_default();
-            if category.is_empty() || !db::table_exists(&self.conn, &category).unwrap_or(false) {
+            if category.is_empty() || !db::table_exists(self.conn(), &category).unwrap_or(false) {
                 skipped_no_table += 1;
                 continue;
             }
-            if db::mpn_exists(&self.conn, &category, &item_id).unwrap_or(false) {
+            if db::mpn_exists(self.conn(), &category, &item_id).unwrap_or(false) {
                 skipped_dup += 1;
                 continue;
             }
             values.insert("MPN".to_string(), item_id);
-            match db::insert_component_row(&self.conn, &category, &values) {
+            match db::insert_component_row(self.conn(), &category, &values) {
                 Ok(()) => imported += 1,
                 Err(e) => {
                     self.set_status_err(format!("Failed to insert component: {}", e));
@@ -1131,8 +1136,7 @@ impl eframe::App for AltiumDbApp {
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
-                        db::checkpoint(&self.conn);
-                        std::process::exit(0);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
                 if ui.button("Settings").clicked() {
@@ -1385,7 +1389,7 @@ impl eframe::App for AltiumDbApp {
                             if !name.is_empty() {
                                 if let Some(ref edit_name) = self.editing_category.clone() {
                                     if edit_name != &name {
-                                        db::rename_table(&self.conn, edit_name, &name).ok();
+                                        db::rename_table(self.conn(), edit_name, &name).ok();
                                         self.dbl.remove_library(edit_name);
                                         let mut lib = altium_dbl::create_library(&name);
                                         lib.name = name.clone();
@@ -1394,8 +1398,8 @@ impl eframe::App for AltiumDbApp {
                                     }
                                     self.editing_category = None;
                                 } else {
-                                    if !db::table_exists(&self.conn, &name).unwrap_or(false) {
-                                        db::ensure_table(&self.conn, &name).ok();
+                                    if !db::table_exists(self.conn(), &name).unwrap_or(false) {
+                                        db::ensure_table(self.conn(), &name).ok();
                                     }
                                     if self.dbl.find_library(&name).is_none() {
                                         self.dbl.add_library(altium_dbl::create_library(&name));
@@ -1416,7 +1420,7 @@ impl eframe::App for AltiumDbApp {
                             if !name.is_empty() {
                                 if let Some(ref edit_name) = self.editing_category.clone() {
                                     if edit_name != &name {
-                                        db::rename_table(&self.conn, edit_name, &name).ok();
+                                        db::rename_table(self.conn(), edit_name, &name).ok();
                                         self.dbl.remove_library(edit_name);
                                         let mut lib = altium_dbl::create_library(&name);
                                         lib.name = name.clone();
@@ -1425,8 +1429,8 @@ impl eframe::App for AltiumDbApp {
                                     }
                                     self.editing_category = None;
                                 } else {
-                                    if !db::table_exists(&self.conn, &name).unwrap_or(false) {
-                                        db::ensure_table(&self.conn, &name).ok();
+                                    if !db::table_exists(self.conn(), &name).unwrap_or(false) {
+                                        db::ensure_table(self.conn(), &name).ok();
                                     }
                                     if self.dbl.find_library(&name).is_none() {
                                         self.dbl.add_library(altium_dbl::create_library(&name));
@@ -1525,11 +1529,11 @@ impl eframe::App for AltiumDbApp {
                 }
                 if let Some(name) = to_clone_cat {
                     let exists = |n: &str| {
-                        db::table_exists(&self.conn, n).unwrap_or(false)
+                        db::table_exists(self.conn(), n).unwrap_or(false)
                             || self.dbl.find_library(n).is_some()
                     };
                     let new_name = unique_name(&name, exists);
-                    db::clone_table(&self.conn, &name, &new_name).ok();
+                    db::clone_table(self.conn(), &name, &new_name).ok();
                     let lib = self.dbl.find_library(&name).cloned();
                     if let Some(mut lib) = lib {
                         lib.name = new_name.clone();
@@ -1543,7 +1547,7 @@ impl eframe::App for AltiumDbApp {
                     self.set_status(format!("Category cloned as '{}'", new_name));
                 }
                 if let Some(name) = to_delete {
-                    db::drop_table(&self.conn, &name).ok();
+                    db::drop_table(self.conn(), &name).ok();
                     self.dbl.remove_library(&name);
                     self.save_dbl();
                     self.refresh_categories();
@@ -1677,10 +1681,10 @@ impl eframe::App for AltiumDbApp {
                                 let item_id = self.component_input.trim().to_string();
                                 if !item_id.is_empty() {
                                     if let Some(ref cat) = self.selected_category {
-                                        db::ensure_table(&self.conn, cat).ok();
+                                        db::ensure_table(self.conn(), cat).ok();
                                         if let Some(edit_id) = self.editing_component.clone() {
                                             db::update_component(
-                                                &self.conn,
+                                                self.conn(),
                                                 cat,
                                                 &db::Component {
                                                     id: edit_id,
@@ -1692,7 +1696,7 @@ impl eframe::App for AltiumDbApp {
                                             self.editing_component = None;
                                         } else {
                                             db::add_component(
-                                                &self.conn,
+                                                self.conn(),
                                                 cat,
                                                 &db::Component {
                                                     mpn: item_id.clone(),
@@ -1718,10 +1722,10 @@ impl eframe::App for AltiumDbApp {
                                 let item_id = self.component_input.trim().to_string();
                                 if !item_id.is_empty() {
                                     if let Some(ref cat) = self.selected_category {
-                                        db::ensure_table(&self.conn, cat).ok();
+                                        db::ensure_table(self.conn(), cat).ok();
                                         if let Some(edit_id) = self.editing_component.clone() {
                                             db::update_component(
-                                                &self.conn,
+                                                self.conn(),
                                                 cat,
                                                 &db::Component {
                                                     id: edit_id,
@@ -1733,7 +1737,7 @@ impl eframe::App for AltiumDbApp {
                                             self.editing_component = None;
                                         } else {
                                             db::add_component(
-                                                &self.conn,
+                                                self.conn(),
                                                 cat,
                                                 &db::Component {
                                                     mpn: item_id.clone(),
@@ -1853,16 +1857,16 @@ impl eframe::App for AltiumDbApp {
                     if let Some(comp) = to_clone_comp {
                         if let Some(ref cat) = self.selected_category {
                             let exists =
-                                |id: &str| db::mpn_exists(&self.conn, cat, id).unwrap_or(false);
+                                |id: &str| db::mpn_exists(self.conn(), cat, id).unwrap_or(false);
                             let new_id = unique_name(&comp.mpn, exists);
-                            db::clone_component(&self.conn, cat, &comp.id, &new_id).ok();
+                            db::clone_component(self.conn(), cat, &comp.id, &new_id).ok();
                             self.set_status(format!("Component cloned as '{}'", new_id));
                         }
                         self.refresh_components();
                     }
                     if let Some(id) = to_delete {
                         if let Some(ref cat) = self.selected_category {
-                            db::delete_component(&self.conn, cat, &id).ok();
+                            db::delete_component(self.conn(), cat, &id).ok();
                         }
                         self.refresh_components();
                         self.selected_component_id = None;
@@ -2294,7 +2298,7 @@ impl eframe::App for AltiumDbApp {
                                                         f.parameter = field_name.clone();
                                                     }
                                                     db::rename_column(
-                                                        &self.conn,
+                                                        self.conn(),
                                                         cat,
                                                         old_col,
                                                         &field_name,
@@ -2317,7 +2321,7 @@ impl eframe::App for AltiumDbApp {
                                                         remove_mode: 0,
                                                         update_mode: 0,
                                                     });
-                                                    db::add_column(&self.conn, cat, &field_name)
+                                                    db::add_column(self.conn(), cat, &field_name)
                                                         .ok();
                                                 }
                                             }
@@ -2437,7 +2441,7 @@ impl eframe::App for AltiumDbApp {
                                 let component_link3_url =
                                     self.component_link3_url_input.trim().to_string();
                                 db::update_component(
-                                    &self.conn,
+                                    self.conn(),
                                     cat,
                                     &db::Component {
                                         id: comp_id.clone(),
@@ -2477,7 +2481,11 @@ impl eframe::App for AltiumDbApp {
                                     let col_clone = col.clone();
                                     self.custom_values[i].1 = new_val.clone();
                                     db::set_custom_value(
-                                        &self.conn, cat, &comp_id, &col_clone, &new_val,
+                                        self.conn(),
+                                        cat,
+                                        &comp_id,
+                                        &col_clone,
+                                        &new_val,
                                     )
                                     .ok();
                                 }
@@ -2489,7 +2497,7 @@ impl eframe::App for AltiumDbApp {
                             }
 
                             if let Some(col) = to_delete_field {
-                                db::drop_column(&self.conn, cat, &col).ok();
+                                db::drop_column(self.conn(), cat, &col).ok();
                                 if let Some(lib) = self.dbl.find_library_mut(cat) {
                                     lib.fields.retain(|f| f.column != col);
                                 }
@@ -2705,7 +2713,7 @@ impl eframe::App for AltiumDbApp {
                 ui.heading("Field Properties");
                 ui.separator();
                 if let Some(ref cat) = self.selected_category.clone() {
-                    let db_cols: Vec<String> = db::get_columns(&self.conn, cat)
+                    let db_cols: Vec<String> = db::get_columns(self.conn(), cat)
                         .unwrap_or_default()
                         .into_iter()
                         .filter(|c| c != "id")
@@ -2847,7 +2855,10 @@ impl eframe::App for AltiumDbApp {
 
 impl Drop for AltiumDbApp {
     fn drop(&mut self) {
-        db::checkpoint(&self.conn);
+        if let Some(conn) = self.conn.take() {
+            db::checkpoint(&conn);
+            drop(conn);
+        }
     }
 }
 
