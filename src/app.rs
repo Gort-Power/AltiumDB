@@ -1,9 +1,7 @@
-use crate::altium_dbl;
 use crate::db;
 use crate::render;
 use calamine::Reader as _;
 use eframe::egui;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -32,14 +30,16 @@ enum AppMode {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BrowseTarget {
     Symbols,
+    DefaultSymbol,
     Footprint1,
     Footprint2,
     Footprint3,
+    DefaultFootprint,
 }
 
 impl BrowseTarget {
     fn is_symbols(self) -> bool {
-        self == BrowseTarget::Symbols
+        matches!(self, BrowseTarget::Symbols | BrowseTarget::DefaultSymbol)
     }
 }
 
@@ -55,17 +55,48 @@ struct SearchParam {
 struct ConfigData {
     theme: Theme,
     db_path: String,
-    dbl_path: String,
     #[serde(default)]
     dsn: String,
+    #[serde(default = "default_pg_host")]
+    pg_host: String,
+    #[serde(default = "default_pg_port")]
+    pg_port: String,
+    #[serde(default)]
+    pg_database: String,
+    #[serde(default)]
+    pg_user: String,
+    #[serde(default)]
+    pg_password: String,
+    #[serde(default = "default_database_type")]
+    database_type: String,
     #[serde(default)]
     symbols_folder: String,
     #[serde(default)]
     footprints_folder: String,
+    #[serde(default)]
+    default_symbol: String,
+    #[serde(default)]
+    default_footprint: String,
+    #[serde(default)]
+    default_symbol_path: String,
+    #[serde(default)]
+    default_footprint_path: String,
     /// Minutes to wait before reminding about an available update again
     /// after the user dismissed it with "Remind me later".
     #[serde(default = "default_remind_minutes")]
     remind_after_minutes: u64,
+}
+
+fn default_database_type() -> String {
+    "sqlite".to_string()
+}
+
+fn default_pg_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_pg_port() -> String {
+    "5432".to_string()
 }
 
 fn default_remind_minutes() -> u64 {
@@ -75,16 +106,18 @@ fn default_remind_minutes() -> u64 {
 #[derive(Clone, Debug)]
 struct CategoryInfo {
     name: String,
-    #[allow(dead_code)]
-    fields: Vec<altium_dbl::Field>,
+}
+
+enum DeleteRequest {
+    Category(String),
+    Component { category: String, id: String },
+    Field { category: String, column: String },
 }
 
 pub struct AltiumDbApp {
-    conn: Option<Connection>,
+    conn: Option<db::Connection>,
     db_path: PathBuf,
-    dbl_path: PathBuf,
     config_path: PathBuf,
-    dbl: altium_dbl::AltiumDbl,
 
     categories: Vec<CategoryInfo>,
     components: Vec<db::Component>,
@@ -93,6 +126,7 @@ pub struct AltiumDbApp {
 
     selected_category: Option<String>,
     selected_component_id: Option<String>,
+    selected_component_index: Option<usize>,
 
     category_input: String,
     component_input: String,
@@ -115,11 +149,13 @@ pub struct AltiumDbApp {
     component_link3_description_input: String,
     component_link3_url_input: String,
     field_col_input: String,
+    lcsc_import_open: bool,
+    lcsc_code_input: String,
 
     editing_category: Option<String>,
     editing_component: Option<String>,
     editing_field: Option<String>,
-    fields_editor_open: bool,
+    pending_delete: Option<DeleteRequest>,
 
     status_msg: String,
 
@@ -129,6 +165,9 @@ pub struct AltiumDbApp {
     viewer_svg: Option<String>,
     viewer_raster_size: egui::Vec2,
     viewer_title: String,
+    viewer_symbol_parts: u32,
+    viewer_symbol_part: u32,
+    viewer_library: String,
 
     browse_open: bool,
     browse_open_at: std::time::Instant,
@@ -139,13 +178,21 @@ pub struct AltiumDbApp {
     browse_texture: Option<egui::TextureHandle>,
     browse_svg: Option<String>,
     browse_raster_size: egui::Vec2,
+    browse_symbol_parts: u32,
+    browse_symbol_part: u32,
 
     theme: Theme,
     settings_db_path: String,
-    settings_dbl_path: String,
-    settings_dsn: String,
+    settings_pg_host: String,
+    settings_pg_port: String,
+    settings_pg_database: String,
+    settings_pg_user: String,
+    settings_pg_password: String,
+    settings_database_type: String,
     settings_symbols_folder: String,
     settings_footprints_folder: String,
+    settings_default_symbol: String,
+    settings_default_footprint: String,
     settings_open: bool,
     about_open: bool,
     viewport_adapted: bool,
@@ -317,69 +364,42 @@ fn draw_texture_fitted(ui: &egui::Ui, canvas_rect: egui::Rect, tex: &egui::Textu
     );
 }
 
-const UPDATE_MODES: [(u8, &str); 3] = [(0, "Default"), (1, "Do not update"), (2, "Update")];
-const ADD_MODES: [(u8, &str); 4] = [
-    (0, "Default"),
-    (1, "Do not add"),
-    (2, "Add"),
-    (3, "Add only if not blank in database"),
-];
-const REMOVE_MODES: [(u8, &str); 3] = [
-    (0, "Default"),
-    (1, "Do not remove"),
-    (2, "Remove only if blank in database"),
-];
-
-fn mode_label(modes: &[(u8, &'static str)], v: u8) -> &'static str {
-    modes
-        .iter()
-        .find(|(m, _)| *m == v)
-        .map(|(_, l)| *l)
-        .unwrap_or("Default")
-}
-
 impl AltiumDbApp {
-    fn conn(&self) -> &Connection {
+    fn conn(&self) -> &db::Connection {
         self.conn.as_ref().expect("database connection")
     }
 
-    pub fn new(
-        conn: Connection,
-        db_path: PathBuf,
-        dbl_path: PathBuf,
-        config_path: PathBuf,
-    ) -> Self {
+    pub fn new(conn: db::Connection, db_path: PathBuf, config_path: PathBuf) -> Self {
         let cfg = Self::load_config_data(&config_path);
         let config_dsn = cfg.dsn;
+        let legacy_pg = db::parse_postgres_connection_string(&config_dsn);
+        let config_database_type = cfg.database_type;
         let theme = cfg.theme;
         let settings_symbols_folder = cfg.symbols_folder;
         let settings_footprints_folder = cfg.footprints_folder;
-        let remind_minutes = cfg.remind_after_minutes.clamp(1, 1440);
-
-        let mut dbl = if dbl_path.exists() {
-            altium_dbl::AltiumDbl::load(&dbl_path, &db_path, &config_dsn)
-                .unwrap_or_else(|_| altium_dbl::AltiumDbl::new(&db_path))
+        let settings_default_symbol = if cfg.default_symbol_path.is_empty() {
+            cfg.default_symbol
         } else {
-            let mut d = altium_dbl::AltiumDbl::new(&db_path);
-            if !config_dsn.trim().is_empty() {
-                d.set_dsn(config_dsn.trim());
-            }
-            d
+            resolve_library_path(&settings_symbols_folder, &cfg.default_symbol_path)
         };
-        dbl.ensure_base_fields();
+        let settings_default_footprint = if cfg.default_footprint_path.is_empty() {
+            cfg.default_footprint
+        } else {
+            resolve_library_path(&settings_footprints_folder, &cfg.default_footprint_path)
+        };
+        let remind_minutes = cfg.remind_after_minutes.clamp(1, 1440);
 
         let mut app = Self {
             conn: Some(conn),
             db_path: db_path.clone(),
-            dbl_path: dbl_path.clone(),
             config_path: config_path.clone(),
-            dbl,
             categories: Vec::new(),
             components: Vec::new(),
             custom_columns: Vec::new(),
             custom_values: Vec::new(),
             selected_category: None,
             selected_component_id: None,
+            selected_component_index: None,
             category_input: String::new(),
             component_input: String::new(),
             mpn_input: String::new(),
@@ -401,10 +421,12 @@ impl AltiumDbApp {
             component_link3_description_input: String::new(),
             component_link3_url_input: String::new(),
             field_col_input: String::new(),
+            lcsc_import_open: false,
+            lcsc_code_input: String::new(),
             editing_category: None,
             editing_component: None,
             editing_field: None,
-            fields_editor_open: false,
+            pending_delete: None,
             status_msg: String::new(),
             viewer_open: false,
             viewer_open_at: std::time::Instant::now(),
@@ -412,6 +434,9 @@ impl AltiumDbApp {
             viewer_svg: None,
             viewer_raster_size: egui::Vec2::ZERO,
             viewer_title: String::new(),
+            viewer_symbol_parts: 1,
+            viewer_symbol_part: 1,
+            viewer_library: String::new(),
             browse_open: false,
             browse_open_at: std::time::Instant::now(),
             browse_target: BrowseTarget::Symbols,
@@ -421,12 +446,40 @@ impl AltiumDbApp {
             browse_texture: None,
             browse_svg: None,
             browse_raster_size: egui::Vec2::ZERO,
+            browse_symbol_parts: 1,
+            browse_symbol_part: 1,
             theme,
             settings_db_path: db_path.display().to_string(),
-            settings_dbl_path: dbl_path.display().to_string(),
-            settings_dsn: config_dsn,
+            settings_pg_host: if cfg.pg_host.is_empty() {
+                legacy_pg[0].clone()
+            } else {
+                cfg.pg_host
+            },
+            settings_pg_port: if cfg.pg_port.is_empty() {
+                legacy_pg[1].clone()
+            } else {
+                cfg.pg_port
+            },
+            settings_pg_database: if cfg.pg_database.is_empty() {
+                legacy_pg[2].clone()
+            } else {
+                cfg.pg_database
+            },
+            settings_pg_user: if cfg.pg_user.is_empty() {
+                legacy_pg[3].clone()
+            } else {
+                cfg.pg_user
+            },
+            settings_pg_password: if cfg.pg_password.is_empty() {
+                legacy_pg[4].clone()
+            } else {
+                cfg.pg_password
+            },
+            settings_database_type: config_database_type,
             settings_symbols_folder,
             settings_footprints_folder,
+            settings_default_symbol,
+            settings_default_footprint,
             settings_open: false,
             about_open: false,
             viewport_adapted: false,
@@ -444,36 +497,52 @@ impl AltiumDbApp {
             remind_timeout: std::time::Duration::from_secs(remind_minutes * 60),
             settings_remind_minutes: remind_minutes,
         };
-        app.sync_dbl_fields_with_db();
-        app.sync_libraries_with_db();
         app.refresh_categories();
-        if !app.dbl_path.exists() {
-            app.save_dbl();
-        }
         app
     }
 
     fn refresh_categories(&mut self) {
-        self.categories = self
-            .dbl
-            .libraries
-            .iter()
-            .map(|lib| CategoryInfo {
-                name: lib.name.clone(),
-                fields: lib.fields.clone(),
-            })
+        self.categories = db::get_tables(self.conn())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|name| CategoryInfo { name })
             .collect();
     }
 
     fn refresh_components(&mut self) {
         if let Some(ref cat) = self.selected_category {
-            db::ensure_table(self.conn(), cat).ok();
-            self.components = db::get_components(self.conn(), cat).unwrap_or_default();
-            self.custom_columns = db::get_columns(self.conn(), cat)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|c| c != "id" && !db::BASE_COLUMNS.contains(&c.as_str()))
-                .collect();
+            if let Err(e) = db::ensure_table(self.conn(), cat) {
+                self.components.clear();
+                self.custom_columns.clear();
+                self.set_status_err(format!("Failed to open category '{}': {}", cat, e));
+                return;
+            }
+            match db::get_components(self.conn(), cat) {
+                Ok(components) => {
+                    self.components = components;
+                    self.selected_component_index = self
+                        .selected_component_id
+                        .as_ref()
+                        .and_then(|id| self.components.iter().position(|item| &item.id == id));
+                }
+                Err(e) => {
+                    self.components.clear();
+                    self.set_status_err(format!("Failed to read category '{}': {}", cat, e));
+                    return;
+                }
+            }
+            match db::get_columns(self.conn(), cat) {
+                Ok(columns) => {
+                    self.custom_columns = columns
+                        .into_iter()
+                        .filter(|c| c != "id" && !db::BASE_COLUMNS.contains(&c.as_str()))
+                        .collect();
+                }
+                Err(e) => {
+                    self.custom_columns.clear();
+                    self.set_status_err(format!("Failed to read category fields: {}", e));
+                }
+            }
         } else {
             self.components.clear();
             self.custom_columns.clear();
@@ -482,13 +551,76 @@ impl AltiumDbApp {
 
     fn refresh_custom_values(&mut self) {
         self.custom_values.clear();
-        if let (Some(ref cat), Some(comp_id)) =
-            (&self.selected_category, self.selected_component_id.clone())
-        {
+        if let (Some(cat), Some(comp_id)) = (
+            self.selected_category.clone(),
+            self.selected_component_id.clone(),
+        ) {
+            let mut read_error = None;
             for col in &self.custom_columns {
-                let val = db::get_custom_value(self.conn(), cat, &comp_id, col).unwrap_or_default();
-                self.custom_values.push((col.clone(), val));
+                match db::get_custom_value(self.conn(), &cat, &comp_id, col) {
+                    Ok(val) => self.custom_values.push((col.clone(), val)),
+                    Err(e) => {
+                        self.custom_values.push((col.clone(), String::new()));
+                        read_error = Some(format!("Failed to read field '{}': {}", col, e));
+                    }
+                }
             }
+            if let Some(error) = read_error {
+                self.set_status_err(error);
+            }
+        }
+    }
+
+    fn create_or_update_component(&mut self, category: &str, mpn: String) {
+        let result = db::ensure_table(self.conn(), category).and_then(|()| {
+            if let Some(id) = self.editing_component.clone() {
+                db::update_component(
+                    self.conn(),
+                    category,
+                    &db::Component {
+                        id,
+                        mpn,
+                        ..db::Component::default()
+                    },
+                )
+                .map(|_| ())
+            } else {
+                db::add_component(
+                    self.conn(),
+                    category,
+                    &db::Component {
+                        mpn,
+                        library_ref: std::path::Path::new(self.settings_default_symbol.trim())
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        library_path: relative_library_path(
+                            &self.settings_symbols_folder,
+                            self.settings_default_symbol.trim(),
+                        ),
+                        footprint_ref: std::path::Path::new(self.settings_default_footprint.trim())
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        footprint_path: relative_library_path(
+                            &self.settings_footprints_folder,
+                            self.settings_default_footprint.trim(),
+                        ),
+                        ..db::Component::default()
+                    },
+                )
+                .map(|_| ())
+            }
+        });
+
+        match result {
+            Ok(()) => {
+                self.editing_component = None;
+                self.component_input.clear();
+                self.refresh_components();
+                self.set_status_ok();
+            }
+            Err(e) => self.set_status_err(format!("Failed to save component: {}", e)),
         }
     }
 
@@ -501,7 +633,12 @@ impl AltiumDbApp {
 
         let comp_id = comp.id.clone();
         self.selected_component_id = Some(comp_id);
-        self.editing_component = Some(comp.id.clone());
+        self.selected_component_index = self.components.iter().position(|item| item.id == comp.id);
+        self.editing_component = Some(if comp.id.is_empty() {
+            format!("__mpn__{}", comp.mpn)
+        } else {
+            comp.id.clone()
+        });
         self.component_input = comp.mpn.clone();
         self.mpn_input = comp.mpn.clone();
         self.manufacturer_input = comp.manufacturer.clone();
@@ -531,12 +668,7 @@ impl AltiumDbApp {
         cols.into_iter()
             .filter(|c| !excluded.contains(&c.as_str()))
             .map(|c| {
-                let name = self
-                    .dbl
-                    .find_library(cat)
-                    .and_then(|l| l.fields.iter().find(|f| f.column == c))
-                    .map(|f| f.column.clone())
-                    .unwrap_or_else(|| c.clone());
+                let name = c.clone();
                 (c, name)
             })
             .collect()
@@ -638,65 +770,30 @@ impl AltiumDbApp {
         }
     }
 
-    fn sync_dbl_fields_with_db(&mut self) {
-        let conn = self.conn.as_ref().expect("database connection");
-        for lib in &mut self.dbl.libraries {
-            let Ok(cols) = db::get_columns(conn, &lib.table) else {
-                continue;
-            };
-            lib.fields.retain(|f| cols.contains(&f.column));
-            for col in cols {
-                if col == "id" || db::BASE_COLUMNS.contains(&col.as_str()) {
-                    continue;
-                }
-                if !lib.fields.iter().any(|f| f.column == col) {
-                    lib.fields.push(altium_dbl::Field {
-                        column: col.clone(),
-                        parameter: col,
-                        is_key: false,
-                        visible_on_add: true,
-                        add_mode: 0,
-                        remove_mode: 0,
-                        update_mode: 0,
-                    });
-                }
-            }
-        }
-    }
-
-    fn sync_libraries_with_db(&mut self) {
-        if let Ok(tables) = db::get_tables(self.conn()) {
-            for table in tables {
-                if self.dbl.find_library(&table).is_none() {
-                    self.dbl.add_library(altium_dbl::create_library(&table));
-                }
-            }
-        }
-    }
-
     fn reopen_database(&mut self) {
         let db_path = PathBuf::from(&self.settings_db_path);
-        let dbl_path = PathBuf::from(&self.settings_dbl_path);
-        let dsn = self.settings_dsn.trim().to_string();
-        match db::open_database(&db_path) {
+        let connection_string = if self.settings_database_type.eq_ignore_ascii_case("sqlite") {
+            db_path.display().to_string()
+        } else {
+            db::postgres_connection_string(
+                &self.settings_pg_host,
+                &self.settings_pg_port,
+                &self.settings_pg_database,
+                &self.settings_pg_user,
+                &self.settings_pg_password,
+            )
+        };
+        match db::open_database_with_config(&self.settings_database_type, &connection_string) {
             Ok(conn) => {
-                db::migrate(&conn).ok();
-                let mut dbl = if dbl_path.exists() {
-                    altium_dbl::AltiumDbl::load(&dbl_path, &db_path, &dsn)
-                        .unwrap_or_else(|_| altium_dbl::AltiumDbl::new(&db_path))
-                } else {
-                    altium_dbl::AltiumDbl::new(&db_path)
-                };
-                if !dsn.is_empty() {
-                    dbl.set_dsn(&dsn);
+                if let Err(e) = db::migrate(&conn) {
+                    self.set_status_err(format!("Failed to migrate database: {}", e));
+                    return;
                 }
-                dbl.ensure_base_fields();
                 self.conn = Some(conn);
                 self.db_path = db_path;
-                self.dbl_path = dbl_path;
-                self.dbl = dbl;
                 self.selected_category = None;
                 self.selected_component_id = None;
+                self.selected_component_index = None;
                 self.components.clear();
                 self.custom_columns.clear();
                 self.custom_values.clear();
@@ -704,16 +801,14 @@ impl AltiumDbApp {
                 self.search_params.clear();
                 self.search_results.clear();
                 self.search_selected = None;
-                self.sync_dbl_fields_with_db();
-                self.sync_libraries_with_db();
                 self.refresh_categories();
-                self.save_dbl();
                 self.set_status_ok();
             }
             Err(e) => self.set_status_err(e),
         }
     }
 
+    #[allow(dead_code)]
     fn import_lcsc_xls(&mut self, path: &std::path::Path) {
         let mut wb = match calamine::open_workbook_auto(path) {
             Ok(wb) => wb,
@@ -782,6 +877,38 @@ impl AltiumDbApp {
                 continue;
             }
             values.insert("MPN".to_string(), item_id);
+            let default_symbol = self.settings_default_symbol.trim();
+            if !default_symbol.is_empty() && !values.contains_key("Library Ref") {
+                values.insert(
+                    "Library Ref".to_string(),
+                    std::path::Path::new(default_symbol)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| default_symbol.to_string()),
+                );
+            }
+            if !default_symbol.is_empty() && !values.contains_key("Library Path") {
+                values.insert(
+                    "Library Path".to_string(),
+                    relative_library_path(&self.settings_symbols_folder, default_symbol),
+                );
+            }
+            let default_footprint = self.settings_default_footprint.trim();
+            if !default_footprint.is_empty() && !values.contains_key("Footprint Ref") {
+                values.insert(
+                    "Footprint Ref".to_string(),
+                    std::path::Path::new(default_footprint)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| default_footprint.to_string()),
+                );
+            }
+            if !default_footprint.is_empty() && !values.contains_key("Footprint Path") {
+                values.insert(
+                    "Footprint Path".to_string(),
+                    relative_library_path(&self.settings_footprints_folder, default_footprint),
+                );
+            }
             match db::insert_component_row(self.conn(), &category, &values) {
                 Ok(()) => imported += 1,
                 Err(e) => {
@@ -800,6 +927,247 @@ impl AltiumDbApp {
         ));
     }
 
+    fn import_lcsc_component(&mut self) {
+        let codes = self
+            .lcsc_code_input
+            .split(',')
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+            .map(str::to_uppercase)
+            .collect::<Vec<_>>();
+        if codes.is_empty() {
+            self.set_status("Enter one or more LCSC part numbers separated by commas");
+            return;
+        }
+        let mut imported = 0;
+        let mut updated = 0;
+        let mut failed = Vec::new();
+        for code in codes {
+            match self.import_lcsc_component_single(&code) {
+                Ok(true) => imported += 1,
+                Ok(false) => updated += 1,
+                Err(e) => failed.push(format!("{}: {}", code, e)),
+            }
+        }
+        self.lcsc_import_open = false;
+        self.lcsc_code_input.clear();
+        self.refresh_categories();
+        self.refresh_components();
+        if failed.is_empty() {
+            self.set_status(format!(
+                "LCSC import complete: {} added, {} updated",
+                imported, updated
+            ));
+        } else {
+            self.set_status_err(format!(
+                "LCSC import: {} added, {} updated; failed: {}",
+                imported,
+                updated,
+                failed.join("; ")
+            ));
+        }
+    }
+
+    fn import_lcsc_component_single(&mut self, code: &str) -> Result<bool, String> {
+        let url = format!(
+            "https://wmsc.lcsc.com/ftps/wm/product/detail?productCode={}",
+            code
+        );
+        let response = match ureq::get(&url)
+            .set("Accept", "application/json")
+            .set("User-Agent", "Mozilla/5.0")
+            .call()
+        {
+            Ok(response) => response,
+            Err(e) => return Err(format!("request failed: {}", e)),
+        };
+        let payload: serde_json::Value = match response.into_json() {
+            Ok(value) => value,
+            Err(e) => return Err(format!("invalid response: {}", e)),
+        };
+        let Some(product) = payload.get("result").filter(|v| !v.is_null()) else {
+            return Err("component was not found".to_string());
+        };
+        let category = product
+            .get("catalogName")
+            .or_else(|| product.get("catalogNameEn"))
+            .or_else(|| product.get("categoryNameEn"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                product
+                    .get("parentCatalogList")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|items| items.last())
+                    .and_then(|item| item.get("catalogNameEn"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+            })
+            .ok_or_else(|| "LCSC response has no category".to_string())?;
+        let category_exists = db::table_exists(self.conn(), &category)
+            .map_err(|e| format!("cannot inspect category: {}", e))?;
+        db::ensure_table(self.conn(), &category)
+            .map_err(|e| format!("cannot create category: {}", e))?;
+
+        let text = |name: &str| {
+            product
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
+        let mut values = std::collections::HashMap::new();
+        let mpn = {
+            let model = text("productModel");
+            if model.is_empty() {
+                code.to_string()
+            } else {
+                model
+            }
+        };
+        values.insert("Verified".to_string(), "0".to_string());
+        values.insert("MPN".to_string(), mpn.clone());
+        values.insert("Manufacturer".to_string(), text("brandNameEn"));
+        values.insert("Description".to_string(), text("productNameEn"));
+        values.insert(
+            "ComponentLink1Description".to_string(),
+            "Datasheet".to_string(),
+        );
+        values.insert("ComponentLink1URL".to_string(), text("pdfUrl"));
+        let package = text("encapStandard");
+        if !package.is_empty() {
+            values.insert("Package".to_string(), package);
+        }
+
+        let default_symbol = self.settings_default_symbol.trim();
+        if !default_symbol.is_empty() {
+            values.insert(
+                "Library Ref".to_string(),
+                std::path::Path::new(default_symbol)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| default_symbol.to_string()),
+            );
+            values.insert(
+                "Library Path".to_string(),
+                relative_library_path(&self.settings_symbols_folder, default_symbol),
+            );
+        }
+        let default_footprint = self.settings_default_footprint.trim();
+        if !default_footprint.is_empty() {
+            values.insert(
+                "Footprint Ref".to_string(),
+                std::path::Path::new(default_footprint)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| default_footprint.to_string()),
+            );
+            values.insert(
+                "Footprint Path".to_string(),
+                relative_library_path(&self.settings_footprints_folder, default_footprint),
+            );
+        }
+        if let Some(params) = product.get("paramVOList").and_then(|v| v.as_array()) {
+            for param in params {
+                let name = param
+                    .get("paramNameEn")
+                    .or_else(|| param.get("paramName"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                let value = param
+                    .get("paramValueEn")
+                    .or_else(|| param.get("paramValue"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                if !name.is_empty() && !value.is_empty() {
+                    values.insert(name.to_string(), value.to_string());
+                }
+            }
+        }
+        if !category_exists {
+            for column in values.keys() {
+                if !db::BASE_COLUMNS.contains(&column.as_str())
+                    && column != "id"
+                    && !db::get_columns(self.conn(), &category)
+                        .map_err(|e| format!("cannot inspect fields: {}", e))?
+                        .contains(column)
+                {
+                    db::add_column(self.conn(), &category, column)
+                        .map_err(|e| format!("cannot create field '{}': {}", column, e))?;
+                }
+            }
+        }
+
+        let component = db::Component {
+            mpn: values.get("MPN").cloned().unwrap_or_default(),
+            manufacturer: values.get("Manufacturer").cloned().unwrap_or_default(),
+            description: values.get("Description").cloned().unwrap_or_default(),
+            verified: false,
+            library_ref: values.get("Library Ref").cloned().unwrap_or_default(),
+            library_path: values.get("Library Path").cloned().unwrap_or_default(),
+            footprint_ref: values.get("Footprint Ref").cloned().unwrap_or_default(),
+            footprint_path: values.get("Footprint Path").cloned().unwrap_or_default(),
+            component_link1_description: values
+                .get("ComponentLink1Description")
+                .cloned()
+                .unwrap_or_default(),
+            component_link1_url: values.get("ComponentLink1URL").cloned().unwrap_or_default(),
+            ..db::Component::default()
+        };
+        let existing = db::get_components(self.conn(), &category)
+            .map_err(|e| format!("cannot read category: {}", e))?
+            .into_iter()
+            .find(|item| item.mpn.eq_ignore_ascii_case(&mpn));
+        if let Some(existing) = existing {
+            db::update_component(
+                self.conn(),
+                &category,
+                &db::Component {
+                    id: existing.id.clone(),
+                    ..component.clone()
+                },
+            )
+            .map_err(|e| format!("update failed: {}", e))?;
+            self.save_lcsc_custom_values(&category, &existing.id, &values)?;
+            Ok(false)
+        } else {
+            let id =
+                db::add_component_with_custom_values(self.conn(), &category, &component, &values)
+                    .map_err(|e| format!("save failed: {}", e))?;
+            self.save_lcsc_custom_values(&category, &id.to_string(), &values)?;
+            Ok(true)
+        }
+    }
+
+    fn save_lcsc_custom_values(
+        &self,
+        category: &str,
+        id: &str,
+        values: &std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
+        if let Ok(columns) = db::get_columns(self.conn(), category) {
+            for (column, value) in values {
+                if column != "id"
+                    && !db::BASE_COLUMNS.contains(&column.as_str())
+                    && columns.contains(column)
+                {
+                    if let Err(e) = db::set_custom_value(self.conn(), category, id, column, value) {
+                        return Err(format!("failed to save field '{}': {}", column, e));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(dead_code)]
     fn cell_to_string(cell: &calamine::Data) -> String {
         match cell {
             calamine::Data::String(s) => s.clone(),
@@ -816,23 +1184,6 @@ impl AltiumDbApp {
             calamine::Data::DateTimeIso(s) => s.clone(),
             calamine::Data::DurationIso(s) => s.clone(),
             calamine::Data::Error(_) | calamine::Data::Empty => String::new(),
-        }
-    }
-
-    fn save_dbl(&mut self) {
-        let search_path = [
-            self.settings_symbols_folder.trim(),
-            self.settings_footprints_folder.trim(),
-        ]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(";");
-        self.dbl
-            .set_database_link("LibrarySearchPath", &search_path);
-        if let Err(e) = self.dbl.save(&self.dbl_path) {
-            self.set_status_err(e);
         }
     }
 
@@ -921,10 +1272,31 @@ impl AltiumDbApp {
         let cfg = ConfigData {
             theme: self.theme,
             db_path: self.db_path.display().to_string(),
-            dbl_path: self.dbl_path.display().to_string(),
-            dsn: self.settings_dsn.clone(),
+            dsn: db::postgres_connection_string(
+                &self.settings_pg_host,
+                &self.settings_pg_port,
+                &self.settings_pg_database,
+                &self.settings_pg_user,
+                &self.settings_pg_password,
+            ),
+            pg_host: self.settings_pg_host.clone(),
+            pg_port: self.settings_pg_port.clone(),
+            pg_database: self.settings_pg_database.clone(),
+            pg_user: self.settings_pg_user.clone(),
+            pg_password: self.settings_pg_password.clone(),
+            database_type: self.settings_database_type.clone(),
             symbols_folder: self.settings_symbols_folder.clone(),
             footprints_folder: self.settings_footprints_folder.clone(),
+            default_symbol: self.settings_default_symbol.clone(),
+            default_footprint: self.settings_default_footprint.clone(),
+            default_symbol_path: relative_library_path(
+                &self.settings_symbols_folder,
+                &self.settings_default_symbol,
+            ),
+            default_footprint_path: relative_library_path(
+                &self.settings_footprints_folder,
+                &self.settings_default_footprint,
+            ),
             remind_after_minutes: self.settings_remind_minutes,
         };
         if let Ok(data) = serde_json::to_string_pretty(&cfg) {
@@ -956,6 +1328,8 @@ impl AltiumDbApp {
         self.browse_texture = None;
         self.browse_svg = None;
         self.browse_raster_size = egui::Vec2::ZERO;
+        self.browse_symbol_parts = 1;
+        self.browse_symbol_part = 1;
         self.refresh_browse_entries();
         self.browse_open_at = std::time::Instant::now();
         self.browse_open = true;
@@ -1000,7 +1374,18 @@ impl AltiumDbApp {
         let out = render::temp_preview_path();
         let bg = self.preview_bg(ctx);
         let result = if self.browse_target.is_symbols() {
-            render::render_symbol(&full_str, &stem, &out, bg)
+            let selected_part = self.browse_symbol_part;
+            self.browse_symbol_parts = render::symbol_part_count(&full_str, &stem)
+                .unwrap_or(1)
+                .max(1);
+            self.browse_symbol_part = selected_part.min(self.browse_symbol_parts);
+            render::render_symbol(
+                &full_str,
+                &stem,
+                &out,
+                bg,
+                (self.browse_symbol_parts > 1).then_some(self.browse_symbol_part),
+            )
         } else {
             render::render_footprint(&full_str, &stem, &out, bg)
         };
@@ -1033,12 +1418,24 @@ impl AltiumDbApp {
         let full_str = self.browse_path.join(&name).to_string_lossy().to_string();
         let stem = Self::browse_file_stem(&name);
         if self.browse_target.is_symbols() {
-            self.library_ref_input = stem;
-            self.library_path_input =
-                relative_library_path(&self.settings_symbols_folder, &full_str);
+            match self.browse_target {
+                BrowseTarget::DefaultSymbol => {
+                    self.settings_default_symbol = full_str;
+                }
+                BrowseTarget::Symbols => {
+                    self.library_ref_input = stem;
+                    self.library_path_input =
+                        relative_library_path(&self.settings_symbols_folder, &full_str);
+                }
+                _ => unreachable!("non-symbol browse target"),
+            }
         } else {
             let rel = relative_library_path(&self.settings_footprints_folder, &full_str);
             match self.browse_target {
+                BrowseTarget::DefaultFootprint => {
+                    self.settings_default_footprint =
+                        self.browse_path.join(&name).to_string_lossy().to_string();
+                }
                 BrowseTarget::Footprint1 => {
                     self.footprint_ref_input = stem;
                     self.footprint_path_input = rel;
@@ -1073,7 +1470,15 @@ impl AltiumDbApp {
         let out = render::temp_preview_path();
         let bg = self.preview_bg(ctx);
         let result = if is_symbol {
-            render::render_symbol(&lib, name, &out, bg)
+            self.viewer_symbol_parts = render::symbol_part_count(&lib, name).unwrap_or(1).max(1);
+            self.viewer_symbol_part = 1;
+            render::render_symbol(
+                &lib,
+                name,
+                &out,
+                bg,
+                (self.viewer_symbol_parts > 1).then_some(self.viewer_symbol_part),
+            )
         } else {
             render::render_footprint(&lib, name, &out, bg)
         };
@@ -1084,12 +1489,34 @@ impl AltiumDbApp {
                     self.viewer_texture = None;
                     self.viewer_raster_size = egui::Vec2::ZERO;
                     self.viewer_title = name.to_string();
+                    self.viewer_library = lib;
                     self.viewer_open_at = std::time::Instant::now();
                     self.viewer_open = true;
                 }
                 Err(e) => self.set_status_err(format!("Failed to read preview: {}", e)),
             },
             Err(e) => self.set_status_err(format!("Failed to render: {}", e)),
+        }
+    }
+
+    fn reload_viewer_symbol(&mut self, ctx: &egui::Context) {
+        let out = render::temp_preview_path();
+        match render::render_symbol(
+            &self.viewer_library,
+            &self.viewer_title,
+            &out,
+            self.preview_bg(ctx),
+            (self.viewer_symbol_parts > 1).then_some(self.viewer_symbol_part),
+        )
+        .and_then(|()| {
+            std::fs::read_to_string(&out).map_err(|e| format!("Failed to read preview: {e}"))
+        }) {
+            Ok(svg) => {
+                self.viewer_svg = Some(svg);
+                self.viewer_texture = None;
+                self.viewer_raster_size = egui::Vec2::ZERO;
+            }
+            Err(e) => self.set_status_err(format!("Failed to render: {e}")),
         }
     }
 }
@@ -1111,27 +1538,8 @@ impl eframe::App for AltiumDbApp {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Import LCSC XLS...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Excel workbook", &["xls", "xlsx"])
-                            .pick_file()
-                        {
-                            self.import_lcsc_xls(&path);
-                        }
-                        ui.close_menu();
-                    }
-                    if ui.button("Export .DbLib...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Altium Database Library", &["DbLib"])
-                            .save_file()
-                        {
-                            match self.dbl.save(&path) {
-                                Ok(()) => {
-                                    self.set_status(format!("Exported to {}", path.display()))
-                                }
-                                Err(e) => self.set_status_err(e),
-                            }
-                        }
+                    if ui.button("Import LCSC component...").clicked() {
+                        self.lcsc_import_open = true;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -1171,56 +1579,62 @@ impl eframe::App for AltiumDbApp {
                 });
 
                 ui.separator();
-                ui.heading("Paths");
+                ui.heading("Database");
+                egui::ComboBox::from_label("Database type")
+                    .selected_text(&self.settings_database_type)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.settings_database_type,
+                            "sqlite".to_string(),
+                            "SQLite",
+                        );
+                        ui.selectable_value(
+                            &mut self.settings_database_type,
+                            "postgres".to_string(),
+                            "PostgreSQL",
+                        );
+                    });
 
                 let row = (ui.cursor().min.x, ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label("Database (.sqlite):");
-                    if ui.button("Browse").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("SQLite Database", &["sqlite"])
-                            .pick_file()
-                        {
-                            self.settings_db_path = path.display().to_string();
+                    if self.settings_database_type == "sqlite" {
+                        ui.label("Database (.sqlite):");
+                        if ui.button("Browse").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("SQLite Database", &["sqlite"])
+                                .pick_file()
+                            {
+                                self.settings_db_path = path.display().to_string();
+                            }
                         }
+                        let w = stretch_width(ui, row, 0.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.settings_db_path)
+                                .hint_text("Path to .sqlite file")
+                                .desired_width(w),
+                        );
                     }
-                    let w = stretch_width(ui, row, 0.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.settings_db_path)
-                            .hint_text("Path to .sqlite file")
-                            .desired_width(w),
-                    );
                 });
 
-                let row = (ui.cursor().min.x, ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(".DbLib:");
-                    if ui.button("Browse").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Altium Database Library", &["DbLib"])
-                            .pick_file()
-                        {
-                            self.settings_dbl_path = path.display().to_string();
-                        }
+                if self.settings_database_type != "sqlite" {
+                    for (label, value, password) in [
+                        ("Host", &mut self.settings_pg_host, false),
+                        ("Port", &mut self.settings_pg_port, false),
+                        ("Database", &mut self.settings_pg_database, false),
+                        ("User", &mut self.settings_pg_user, false),
+                        ("Password", &mut self.settings_pg_password, true),
+                    ] {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            let mut edit = egui::TextEdit::singleline(value)
+                                .desired_width(ui.available_width());
+                            if password {
+                                edit = edit.password(true);
+                            }
+                            ui.add(edit);
+                        });
                     }
-                    let w = stretch_width(ui, row, 0.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.settings_dbl_path)
-                            .hint_text("Path to .DbLib file")
-                            .desired_width(w),
-                    );
-                });
-
-                let row = (ui.cursor().min.x, ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label("ODBC Data Source:");
-                    let w = stretch_width(ui, row, 0.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.settings_dsn)
-                            .hint_text("ODBC DSN name (e.g. gortpower)")
-                            .desired_width(w),
-                    );
-                });
+                }
 
                 let row = (ui.cursor().min.x, ui.available_width());
                 ui.horizontal(|ui| {
@@ -1254,6 +1668,30 @@ impl eframe::App for AltiumDbApp {
                     );
                 });
 
+                ui.horizontal(|ui| {
+                    ui.label("Default Symbol:");
+                    if ui.button("Browse").clicked() {
+                        self.open_browse(ctx, BrowseTarget::DefaultSymbol);
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_default_symbol)
+                            .hint_text("Full path to the default .SchLib file")
+                            .desired_width(ui.available_width()),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Default Footprint:");
+                    if ui.button("Browse").clicked() {
+                        self.open_browse(ctx, BrowseTarget::DefaultFootprint);
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_default_footprint)
+                            .hint_text("Full path to the default .PcbLib file")
+                            .desired_width(ui.available_width()),
+                    );
+                });
+
                 ui.separator();
                 ui.heading("Updates");
                 ui.horizontal(|ui| {
@@ -1282,11 +1720,42 @@ impl eframe::App for AltiumDbApp {
             }
         }
 
+        if self.lcsc_import_open {
+            let mut import_clicked = false;
+            let modal = egui::Modal::new(egui::Id::new("lcsc_import_modal")).show(ctx, |ui| {
+                ui.set_min_width(self.modal_size(ctx, egui::vec2(460.0, 220.0)).x);
+                ui.heading("Import LCSC component");
+                ui.label("LCSC part number:");
+                let code_response = ui.add(
+                    egui::TextEdit::singleline(&mut self.lcsc_code_input)
+                        .hint_text("For example, C2856764")
+                        .desired_width(ui.available_width()),
+                );
+                ui.label("Category is detected automatically from LCSC.");
+                ui.horizontal(|ui| {
+                    if ui.button("Import").clicked()
+                        || (code_response.lost_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                    {
+                        import_clicked = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.lcsc_import_open = false;
+                    }
+                });
+            });
+            if import_clicked {
+                self.import_lcsc_component();
+            } else if modal.should_close() {
+                self.lcsc_import_open = false;
+            }
+        }
+
         if self.about_open {
             let modal = egui::Modal::new(egui::Id::new("about_modal")).show(ctx, |ui| {
                 ui.set_min_width(self.modal_size(ctx, egui::vec2(400.0, 240.0)).x);
                 ui.heading("About AltiumDB");
-                ui.label("AltiumDB — Altium Designer Database Library manager");
+                ui.label("AltiumDB вЂ” Altium Designer Database Library manager");
                 ui.label("Manage component database, browse symbols,");
                 ui.label("footprints and edit addition fields.");
                 ui.separator();
@@ -1390,23 +1859,14 @@ impl eframe::App for AltiumDbApp {
                                 if let Some(ref edit_name) = self.editing_category.clone() {
                                     if edit_name != &name {
                                         db::rename_table(self.conn(), edit_name, &name).ok();
-                                        self.dbl.remove_library(edit_name);
-                                        let mut lib = altium_dbl::create_library(&name);
-                                        lib.name = name.clone();
-                                        lib.table = name.clone();
-                                        self.dbl.add_library(lib);
                                     }
                                     self.editing_category = None;
                                 } else {
                                     if !db::table_exists(self.conn(), &name).unwrap_or(false) {
                                         db::ensure_table(self.conn(), &name).ok();
                                     }
-                                    if self.dbl.find_library(&name).is_none() {
-                                        self.dbl.add_library(altium_dbl::create_library(&name));
-                                    }
                                 }
                                 self.category_input.clear();
-                                self.save_dbl();
                                 self.refresh_categories();
                                 self.set_status_ok();
                             }
@@ -1421,23 +1881,14 @@ impl eframe::App for AltiumDbApp {
                                 if let Some(ref edit_name) = self.editing_category.clone() {
                                     if edit_name != &name {
                                         db::rename_table(self.conn(), edit_name, &name).ok();
-                                        self.dbl.remove_library(edit_name);
-                                        let mut lib = altium_dbl::create_library(&name);
-                                        lib.name = name.clone();
-                                        lib.table = name.clone();
-                                        self.dbl.add_library(lib);
                                     }
                                     self.editing_category = None;
                                 } else {
                                     if !db::table_exists(self.conn(), &name).unwrap_or(false) {
                                         db::ensure_table(self.conn(), &name).ok();
                                     }
-                                    if self.dbl.find_library(&name).is_none() {
-                                        self.dbl.add_library(altium_dbl::create_library(&name));
-                                    }
                                 }
                                 self.category_input.clear();
-                                self.save_dbl();
                                 self.refresh_categories();
                                 self.set_status_ok();
                             }
@@ -1502,6 +1953,7 @@ impl eframe::App for AltiumDbApp {
                 if let Some(name) = to_select {
                     self.selected_category = Some(name);
                     self.selected_component_id = None;
+                    self.selected_component_index = None;
                     self.refresh_components();
                     self.custom_values.clear();
                 }
@@ -1528,34 +1980,14 @@ impl eframe::App for AltiumDbApp {
                     self.category_input = name;
                 }
                 if let Some(name) = to_clone_cat {
-                    let exists = |n: &str| {
-                        db::table_exists(self.conn(), n).unwrap_or(false)
-                            || self.dbl.find_library(n).is_some()
-                    };
+                    let exists = |n: &str| db::table_exists(self.conn(), n).unwrap_or(false);
                     let new_name = unique_name(&name, exists);
                     db::clone_table(self.conn(), &name, &new_name).ok();
-                    let lib = self.dbl.find_library(&name).cloned();
-                    if let Some(mut lib) = lib {
-                        lib.name = new_name.clone();
-                        lib.table = new_name.clone();
-                        self.dbl.add_library(lib);
-                    } else {
-                        self.dbl.add_library(altium_dbl::create_library(&new_name));
-                    }
-                    self.save_dbl();
                     self.refresh_categories();
                     self.set_status(format!("Category cloned as '{}'", new_name));
                 }
                 if let Some(name) = to_delete {
-                    db::drop_table(self.conn(), &name).ok();
-                    self.dbl.remove_library(&name);
-                    self.save_dbl();
-                    self.refresh_categories();
-                    self.selected_category = None;
-                    self.components.clear();
-                    self.selected_component_id = None;
-                    self.custom_values.clear();
-                    self.set_status_ok();
+                    self.pending_delete = Some(DeleteRequest::Category(name));
                 }
             });
 
@@ -1680,35 +2112,9 @@ impl eframe::App for AltiumDbApp {
                             if ui.small_button(btn_text).clicked() {
                                 let item_id = self.component_input.trim().to_string();
                                 if !item_id.is_empty() {
-                                    if let Some(ref cat) = self.selected_category {
-                                        db::ensure_table(self.conn(), cat).ok();
-                                        if let Some(edit_id) = self.editing_component.clone() {
-                                            db::update_component(
-                                                self.conn(),
-                                                cat,
-                                                &db::Component {
-                                                    id: edit_id,
-                                                    mpn: item_id.clone(),
-                                                    ..db::Component::default()
-                                                },
-                                            )
-                                            .ok();
-                                            self.editing_component = None;
-                                        } else {
-                                            db::add_component(
-                                                self.conn(),
-                                                cat,
-                                                &db::Component {
-                                                    mpn: item_id.clone(),
-                                                    ..db::Component::default()
-                                                },
-                                            )
-                                            .ok();
-                                        }
+                                    if let Some(cat) = self.selected_category.clone() {
+                                        self.create_or_update_component(&cat, item_id);
                                     }
-                                    self.component_input.clear();
-                                    self.refresh_components();
-                                    self.set_status_ok();
                                 }
                             }
                             let w = stretch_width(ui, row, 0.0);
@@ -1721,35 +2127,9 @@ impl eframe::App for AltiumDbApp {
                             {
                                 let item_id = self.component_input.trim().to_string();
                                 if !item_id.is_empty() {
-                                    if let Some(ref cat) = self.selected_category {
-                                        db::ensure_table(self.conn(), cat).ok();
-                                        if let Some(edit_id) = self.editing_component.clone() {
-                                            db::update_component(
-                                                self.conn(),
-                                                cat,
-                                                &db::Component {
-                                                    id: edit_id,
-                                                    mpn: item_id.clone(),
-                                                    ..db::Component::default()
-                                                },
-                                            )
-                                            .ok();
-                                            self.editing_component = None;
-                                        } else {
-                                            db::add_component(
-                                                self.conn(),
-                                                cat,
-                                                &db::Component {
-                                                    mpn: item_id.clone(),
-                                                    ..db::Component::default()
-                                                },
-                                            )
-                                            .ok();
-                                        }
+                                    if let Some(cat) = self.selected_category.clone() {
+                                        self.create_or_update_component(&cat, item_id);
                                     }
-                                    self.component_input.clear();
-                                    self.refresh_components();
-                                    self.set_status_ok();
                                 }
                             }
                         });
@@ -1759,50 +2139,73 @@ impl eframe::App for AltiumDbApp {
 
                     ui.separator();
 
-                    let selected = self.selected_component_id.clone();
+                    let selected_index = self.selected_component_index;
                     let mut to_select = None;
+                    let mut to_select_index = None;
                     let mut to_delete = None;
                     let mut to_edit = None;
                     let mut to_clone_comp = None;
                     let mut hovered_comp: Option<String> = None;
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        for comp in &self.components {
-                            let is_selected = selected == Some(comp.id.clone());
-                            let response = ui.selectable_label(is_selected, &comp.mpn);
-                            if response.clicked() {
-                                to_select = Some(comp.id.clone());
-                            }
-                            if response.hovered() {
-                                hovered_comp = Some(comp.id.clone());
-                            }
-                            response.context_menu(|ui| {
-                                if ui.button("Edit").clicked() {
-                                    to_edit = Some(comp.clone());
-                                    ui.close_menu();
+                        for (index, comp) in self.components.iter().enumerate() {
+                            ui.push_id(index, |ui| {
+                                let is_selected = selected_index == Some(index);
+                                let response = ui.selectable_label(is_selected, &comp.mpn);
+                                if response.clicked() {
+                                    to_select = Some(comp.id.clone());
+                                    to_select_index = Some(index);
                                 }
-                                if ui.button("Clone").clicked() {
-                                    to_clone_comp = Some(comp.clone());
-                                    ui.close_menu();
+                                if response.hovered() {
+                                    hovered_comp = Some(if comp.id.is_empty() {
+                                        comp.mpn.clone()
+                                    } else {
+                                        comp.id.clone()
+                                    });
                                 }
-                                if ui.button("Delete").clicked() {
-                                    to_delete = Some(comp.id.clone());
-                                    ui.close_menu();
-                                }
+                                response.context_menu(|ui| {
+                                    if ui.button("Edit").clicked() {
+                                        to_edit = Some(comp.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Clone").clicked() {
+                                        to_clone_comp = Some(comp.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        to_delete = Some(if comp.id.is_empty() {
+                                            comp.mpn.clone()
+                                        } else {
+                                            comp.id.clone()
+                                        });
+                                        ui.close_menu();
+                                    }
+                                });
                             });
                         }
                     });
 
-                    if hovered_comp.is_some()
-                        && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete))
-                    {
-                        to_delete = hovered_comp;
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
+                        to_delete = hovered_comp.or_else(|| {
+                            selected_index.and_then(|index| {
+                                self.components.get(index).map(|comp| {
+                                    if comp.id.is_empty() {
+                                        comp.mpn.clone()
+                                    } else {
+                                        comp.id.clone()
+                                    }
+                                })
+                            })
+                        });
                     }
 
-                    if let Some(id) = to_select {
-                        self.selected_component_id = Some(id.clone());
-                        self.refresh_custom_values();
-                        if let Some(comp) = self.components.iter().find(|c| c.id == id) {
+                    if let Some(index) = to_select_index {
+                        if let Some(id) = to_select {
+                            self.selected_component_id = Some(id);
+                            self.selected_component_index = Some(index);
+                            self.refresh_custom_values();
+                        }
+                        if let Some(comp) = self.components.get(index).cloned() {
                             self.mpn_input = comp.mpn.clone();
                             self.manufacturer_input = comp.manufacturer.clone();
                             self.verified_input = comp.verified;
@@ -1829,7 +2232,13 @@ impl eframe::App for AltiumDbApp {
                     if let Some(comp) = to_edit {
                         let comp_id = comp.id.clone();
                         self.selected_component_id = Some(comp_id.clone());
-                        self.editing_component = Some(comp_id);
+                        self.selected_component_index =
+                            self.components.iter().position(|item| item.id == comp.id);
+                        self.editing_component = Some(if comp_id.is_empty() {
+                            format!("__mpn__{}", comp.mpn)
+                        } else {
+                            comp_id
+                        });
                         self.component_input = comp.mpn.clone();
                         self.mpn_input = comp.mpn.clone();
                         self.manufacturer_input = comp.manufacturer.clone();
@@ -1855,23 +2264,88 @@ impl eframe::App for AltiumDbApp {
                         self.refresh_custom_values();
                     }
                     if let Some(comp) = to_clone_comp {
+                        let mut cloned = false;
+                        let mut cloned_mpn = None;
                         if let Some(ref cat) = self.selected_category {
                             let exists =
                                 |id: &str| db::mpn_exists(self.conn(), cat, id).unwrap_or(false);
                             let new_id = unique_name(&comp.mpn, exists);
-                            db::clone_component(self.conn(), cat, &comp.id, &new_id).ok();
-                            self.set_status(format!("Component cloned as '{}'", new_id));
+                            let source_id = if comp.id.is_empty() {
+                                comp.mpn.clone()
+                            } else {
+                                comp.id.clone()
+                            };
+                            match db::clone_component(self.conn(), cat, &source_id, &new_id) {
+                                Ok(()) => {
+                                    let source_key = if comp.id.is_empty() {
+                                        format!("__mpn__{}", comp.mpn)
+                                    } else {
+                                        comp.id.clone()
+                                    };
+                                    let target_key = format!("__mpn__{}", new_id);
+                                    for column in self.custom_columns.clone() {
+                                        match db::get_custom_value(
+                                            self.conn(),
+                                            cat,
+                                            &source_key,
+                                            &column,
+                                        )
+                                        .and_then(
+                                            |value| {
+                                                db::set_custom_value(
+                                                    self.conn(),
+                                                    cat,
+                                                    &target_key,
+                                                    &column,
+                                                    &value,
+                                                )
+                                            },
+                                        ) {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                self.set_status_err(format!(
+                                                    "Failed to clone field '{}': {}",
+                                                    column, e
+                                                ));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    cloned = true;
+                                    cloned_mpn = Some(new_id.clone());
+                                    self.set_status(format!("Component cloned as '{}'", new_id));
+                                }
+                                Err(e) => {
+                                    self.set_status_err(format!(
+                                        "Failed to clone component: {}",
+                                        e
+                                    ));
+                                }
+                            }
                         }
-                        self.refresh_components();
+                        if cloned {
+                            self.refresh_components();
+                            let new_id = cloned_mpn.unwrap_or_default();
+                            if let Some(index) = self
+                                .components
+                                .iter()
+                                .position(|component| component.mpn == new_id)
+                            {
+                                let component = self.components[index].clone();
+                                self.selected_component_index = Some(index);
+                                self.selected_component_id = Some(if component.id.is_empty() {
+                                    format!("__mpn__{}", component.mpn)
+                                } else {
+                                    component.id.clone()
+                                });
+                                self.refresh_custom_values();
+                            }
+                        }
                     }
                     if let Some(id) = to_delete {
-                        if let Some(ref cat) = self.selected_category {
-                            db::delete_component(self.conn(), cat, &id).ok();
+                        if let Some(category) = self.selected_category.clone() {
+                            self.pending_delete = Some(DeleteRequest::Component { category, id });
                         }
-                        self.refresh_components();
-                        self.selected_component_id = None;
-                        self.custom_values.clear();
-                        self.set_status_ok();
                     }
                 }
             });
@@ -1982,9 +2456,6 @@ impl eframe::App for AltiumDbApp {
                         if let Some(comp_id) = self.selected_component_id.clone() {
                             ui.horizontal(|ui| {
                                 ui.heading("Base Fields");
-                                if ui.button("Fields...").clicked() {
-                                    self.fields_editor_open = true;
-                                }
                             });
                             ui.separator();
 
@@ -2286,52 +2757,24 @@ impl eframe::App for AltiumDbApp {
                                 if do_action {
                                     let field_name = self.field_col_input.trim().to_string();
                                     if !field_name.is_empty() {
-                                        if let Some(lib) = self.dbl.find_library_mut(cat) {
-                                            if let Some(ref old_col) = self.editing_field.clone() {
-                                                if old_col != &field_name {
-                                                    if let Some(f) = lib
-                                                        .fields
-                                                        .iter_mut()
-                                                        .find(|f| f.column == *old_col)
-                                                    {
-                                                        f.column = field_name.clone();
-                                                        f.parameter = field_name.clone();
-                                                    }
-                                                    db::rename_column(
-                                                        self.conn(),
-                                                        cat,
-                                                        old_col,
-                                                        &field_name,
-                                                    )
-                                                    .ok();
-                                                }
-                                                self.editing_field = None;
-                                            } else {
-                                                if !lib
-                                                    .fields
-                                                    .iter()
-                                                    .any(|f| f.column == field_name)
-                                                {
-                                                    lib.fields.push(altium_dbl::Field {
-                                                        column: field_name.clone(),
-                                                        parameter: field_name.clone(),
-                                                        is_key: false,
-                                                        visible_on_add: true,
-                                                        add_mode: 0,
-                                                        remove_mode: 0,
-                                                        update_mode: 0,
-                                                    });
-                                                    db::add_column(self.conn(), cat, &field_name)
-                                                        .ok();
-                                                }
+                                        if let Some(ref old_col) = self.editing_field.clone() {
+                                            if old_col != &field_name {
+                                                db::rename_column(
+                                                    self.conn(),
+                                                    cat,
+                                                    old_col,
+                                                    &field_name,
+                                                )
+                                                .ok();
                                             }
-                                            self.save_dbl();
-                                            self.refresh_components();
-                                            self.refresh_custom_values();
-                                            self.field_col_input.clear();
-                                            self.editing_field = None;
-                                            self.set_status_ok();
+                                        } else {
+                                            db::add_column(self.conn(), cat, &field_name).ok();
                                         }
+                                        self.refresh_components();
+                                        self.refresh_custom_values();
+                                        self.field_col_input.clear();
+                                        self.editing_field = None;
+                                        self.set_status_ok();
                                     }
                                 }
                             });
@@ -2340,17 +2783,13 @@ impl eframe::App for AltiumDbApp {
 
                             let mut values = self.custom_values.clone();
                             let mut changed = None;
+                            let mut save_custom_values = false;
                             let mut to_delete_field = None;
                             let mut to_edit_field = None;
                             let mut hovered_field: Option<String> = None;
 
                             for (i, (col, val)) in values.iter_mut().enumerate() {
-                                let display = self
-                                    .dbl
-                                    .find_library(cat)
-                                    .and_then(|l| l.fields.iter().find(|f| &f.column == col))
-                                    .map(|f| f.column.clone())
-                                    .unwrap_or_else(|| col.clone());
+                                let display = col.clone();
 
                                 let mut buf = val.clone();
                                 let row = (ui.cursor().min.x, ui.available_width());
@@ -2362,7 +2801,7 @@ impl eframe::App for AltiumDbApp {
                                             egui::TextEdit::singleline(&mut buf).desired_width(w),
                                         );
                                         if r.changed() {
-                                            changed = Some((i, buf.clone()));
+                                            changed = Some((i, buf.clone(), r.lost_focus()));
                                         }
                                         r
                                     })
@@ -2389,6 +2828,7 @@ impl eframe::App for AltiumDbApp {
                                     || ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S))
                                 {
                                     save_component = true;
+                                    save_custom_values = true;
                                 }
                                 if ui.small_button("Clear").clicked() {
                                     self.mpn_input.clear();
@@ -2440,34 +2880,89 @@ impl eframe::App for AltiumDbApp {
                                     self.component_link3_description_input.trim().to_string();
                                 let component_link3_url =
                                     self.component_link3_url_input.trim().to_string();
-                                db::update_component(
-                                    self.conn(),
-                                    cat,
-                                    &db::Component {
-                                        id: comp_id.clone(),
-                                        mpn,
-                                        manufacturer,
-                                        verified,
-                                        library_ref,
-                                        footprint_ref,
-                                        description,
-                                        component_link1_description,
-                                        component_link1_url,
-                                        component_link2_description,
-                                        component_link2_url,
-                                        component_link3_description,
-                                        component_link3_url,
-                                        library_path,
-                                        footprint_path,
-                                        footprint_ref2,
-                                        footprint_path2,
-                                        footprint_ref3,
-                                        footprint_path3,
-                                    },
-                                )
-                                .ok();
-                                self.refresh_components();
-                                self.set_status_ok();
+                                let save_result =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        db::update_component(
+                                            self.conn(),
+                                            cat,
+                                            &db::Component {
+                                                id: comp_id.clone(),
+                                                mpn,
+                                                manufacturer,
+                                                verified,
+                                                library_ref,
+                                                footprint_ref,
+                                                description,
+                                                component_link1_description,
+                                                component_link1_url,
+                                                component_link2_description,
+                                                component_link2_url,
+                                                component_link3_description,
+                                                component_link3_url,
+                                                library_path,
+                                                footprint_path,
+                                                footprint_ref2,
+                                                footprint_path2,
+                                                footprint_ref3,
+                                                footprint_path3,
+                                            },
+                                        )
+                                    }));
+                                match save_result {
+                                    Ok(Ok(())) => {
+                                        if let Some(index) = self.selected_component_index {
+                                            if let Some(component) = self.components.get_mut(index)
+                                            {
+                                                component.mpn = self.mpn_input.clone();
+                                                component.manufacturer =
+                                                    self.manufacturer_input.clone();
+                                                component.verified = self.verified_input;
+                                                component.library_ref =
+                                                    self.library_ref_input.clone();
+                                                component.library_path =
+                                                    self.library_path_input.clone();
+                                                component.footprint_ref =
+                                                    self.footprint_ref_input.clone();
+                                                component.footprint_path =
+                                                    self.footprint_path_input.clone();
+                                                component.footprint_ref2 =
+                                                    self.footprint_ref2_input.clone();
+                                                component.footprint_path2 =
+                                                    self.footprint_path2_input.clone();
+                                                component.footprint_ref3 =
+                                                    self.footprint_ref3_input.clone();
+                                                component.footprint_path3 =
+                                                    self.footprint_path3_input.clone();
+                                                component.description =
+                                                    self.description_input.clone();
+                                                component.component_link1_description =
+                                                    self.component_link1_description_input.clone();
+                                                component.component_link1_url =
+                                                    self.component_link1_url_input.clone();
+                                                component.component_link2_description =
+                                                    self.component_link2_description_input.clone();
+                                                component.component_link2_url =
+                                                    self.component_link2_url_input.clone();
+                                                component.component_link3_description =
+                                                    self.component_link3_description_input.clone();
+                                                component.component_link3_url =
+                                                    self.component_link3_url_input.clone();
+                                            }
+                                        }
+                                        self.set_status_ok();
+                                    }
+                                    Ok(Err(e)) => {
+                                        self.set_status_err(format!(
+                                            "Failed to save component: {}",
+                                            e
+                                        ));
+                                    }
+                                    Err(_) => {
+                                        self.set_status_err(
+                                            "Failed to save component: database operation panicked",
+                                        );
+                                    }
+                                }
                             }
 
                             if hovered_field.is_some()
@@ -2476,18 +2971,55 @@ impl eframe::App for AltiumDbApp {
                                 to_delete_field = hovered_field;
                             }
 
-                            if let Some((i, new_val)) = changed {
-                                if let Some((col, _)) = values.get(i) {
-                                    let col_clone = col.clone();
-                                    self.custom_values[i].1 = new_val.clone();
-                                    db::set_custom_value(
+                            if let Some((i, new_val, should_save)) = changed {
+                                self.custom_values[i].1 = new_val.clone();
+                                if let Some((_, value)) = values.get_mut(i) {
+                                    *value = new_val.clone();
+                                }
+                                if should_save {
+                                    if let Some((col, _)) = values.get(i) {
+                                        let col_clone = col.clone();
+                                        let save_result = db::set_custom_value(
+                                            self.conn(),
+                                            cat,
+                                            &comp_id,
+                                            &col_clone,
+                                            &new_val,
+                                        );
+                                        match save_result {
+                                            Ok(()) => {
+                                                self.set_status_ok();
+                                            }
+                                            Err(e) => {
+                                                self.set_status_err(format!(
+                                                    "Failed to save field '{}': {}",
+                                                    col_clone, e
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if save_custom_values {
+                                let custom_values = self.custom_values.clone();
+                                for (col, value) in custom_values {
+                                    match db::set_custom_value(
                                         self.conn(),
                                         cat,
                                         &comp_id,
-                                        &col_clone,
-                                        &new_val,
-                                    )
-                                    .ok();
+                                        &col,
+                                        &value,
+                                    ) {
+                                        Ok(()) => {}
+                                        Err(e) => {
+                                            self.set_status_err(format!(
+                                                "Failed to save field '{}': {}",
+                                                col, e
+                                            ));
+                                            break;
+                                        }
+                                    }
                                 }
                             }
 
@@ -2497,14 +3029,10 @@ impl eframe::App for AltiumDbApp {
                             }
 
                             if let Some(col) = to_delete_field {
-                                db::drop_column(self.conn(), cat, &col).ok();
-                                if let Some(lib) = self.dbl.find_library_mut(cat) {
-                                    lib.fields.retain(|f| f.column != col);
-                                }
-                                self.save_dbl();
-                                self.refresh_components();
-                                self.refresh_custom_values();
-                                self.set_status_ok();
+                                self.pending_delete = Some(DeleteRequest::Field {
+                                    category: cat.clone(),
+                                    column: col,
+                                });
                             }
                         } else {
                             ui.centered_and_justified(|ui| {
@@ -2520,12 +3048,98 @@ impl eframe::App for AltiumDbApp {
             }
         });
 
+        if let Some(request) = self.pending_delete.take() {
+            let title = match &request {
+                DeleteRequest::Category(name) => format!("Delete category '{}'?", name),
+                DeleteRequest::Component { id, .. } => {
+                    format!("Delete component '{}'?", id)
+                }
+                DeleteRequest::Field { column, .. } => format!("Delete field '{}'?", column),
+            };
+            let mut confirmed = false;
+            let mut cancelled = false;
+            let modal = egui::Modal::new(egui::Id::new("confirm_deletion_modal")).show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.heading("Confirm deletion");
+                ui.label(title);
+                ui.horizontal(|ui| {
+                    if ui.button("Delete").clicked() {
+                        confirmed = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancelled = true;
+                    }
+                });
+            });
+            if confirmed {
+                match request {
+                    DeleteRequest::Category(name) => match db::drop_table(self.conn(), &name) {
+                        Ok(()) => {
+                            self.refresh_categories();
+                            self.selected_category = None;
+                            self.components.clear();
+                            self.selected_component_id = None;
+                            self.custom_values.clear();
+                            self.set_status_ok();
+                        }
+                        Err(e) => self.set_status_err(format!("Failed to delete category: {}", e)),
+                    },
+                    DeleteRequest::Component { category, id } => {
+                        match db::delete_component(self.conn(), &category, &id) {
+                            Ok(()) => {
+                                self.refresh_components();
+                                self.selected_component_id = None;
+                                self.selected_component_index = None;
+                                self.custom_values.clear();
+                                self.set_status_ok();
+                            }
+                            Err(e) => {
+                                self.set_status_err(format!("Failed to delete component: {}", e))
+                            }
+                        }
+                    }
+                    DeleteRequest::Field { category, column } => {
+                        match db::drop_column(self.conn(), &category, &column) {
+                            Ok(()) => {
+                                self.refresh_components();
+                                self.refresh_custom_values();
+                                self.set_status_ok();
+                            }
+                            Err(e) => self.set_status_err(format!("Failed to delete field: {}", e)),
+                        }
+                    }
+                }
+            } else if !cancelled && !modal.should_close() {
+                self.pending_delete = Some(request);
+            }
+        }
+
         // Viewer modal
         if self.viewer_open {
             let svg = self.viewer_svg.clone();
+            let mut viewer_part_changed = false;
             let modal = egui::Modal::new(egui::Id::new("viewer_modal")).show(ctx, |ui| {
                 ui.set_min_size(self.modal_size(ctx, egui::vec2(600.0, 450.0)));
-                ui.heading(format!("Preview: {}", self.viewer_title));
+                ui.horizontal(|ui| {
+                    ui.heading(format!("Preview: {}", self.viewer_title));
+                    if self.viewer_symbol_parts > 1 {
+                        viewer_part_changed = egui::ComboBox::from_id_salt("viewer_symbol_part")
+                            .selected_text(format!("Section {}", self.viewer_symbol_part))
+                            .show_ui(ui, |ui| {
+                                (1..=self.viewer_symbol_parts)
+                                    .map(|part| {
+                                        ui.selectable_value(
+                                            &mut self.viewer_symbol_part,
+                                            part,
+                                            format!("Section {}", part),
+                                        )
+                                    })
+                                    .any(|response| response.changed())
+                            })
+                            .inner
+                            .unwrap_or(false);
+                    }
+                });
                 let avail = ui.available_size();
                 let canvas_size = egui::vec2(avail.x.max(100.0), avail.y.max(100.0));
                 let (cid, canvas_rect) = ui.allocate_space(canvas_size);
@@ -2553,6 +3167,9 @@ impl eframe::App for AltiumDbApp {
                     ui.label("No preview loaded");
                 }
             });
+            if viewer_part_changed {
+                self.reload_viewer_symbol(ctx);
+            }
             if modal.should_close()
                 && self.viewer_open_at.elapsed() >= std::time::Duration::from_millis(150)
             {
@@ -2569,6 +3186,7 @@ impl eframe::App for AltiumDbApp {
             let mut apply_now = false;
             let mut apply_clicked = false;
             let mut cancel_clicked = false;
+            let mut browse_part_changed = false;
 
             let modal = egui::Modal::new(egui::Id::new("browse_modal")).show(ctx, |ui| {
                 ui.set_min_size(self.modal_size(ctx, egui::vec2(880.0, 560.0)));
@@ -2577,6 +3195,23 @@ impl eframe::App for AltiumDbApp {
                 } else {
                     "Browse Footprints"
                 });
+                if self.browse_target.is_symbols() && self.browse_symbol_parts > 1 {
+                    browse_part_changed = egui::ComboBox::from_id_salt("browse_symbol_part")
+                        .selected_text(format!("Section {}", self.browse_symbol_part))
+                        .show_ui(ui, |ui| {
+                            (1..=self.browse_symbol_parts)
+                                .map(|part| {
+                                    ui.selectable_value(
+                                        &mut self.browse_symbol_part,
+                                        part,
+                                        format!("Section {}", part),
+                                    )
+                                })
+                                .any(|response| response.changed())
+                        })
+                        .inner
+                        .unwrap_or(false);
+                }
 
                 ui.horizontal(|ui| {
                     if ui.button("Back").clicked() {
@@ -2700,154 +3335,14 @@ impl eframe::App for AltiumDbApp {
                 } else {
                     self.load_browse_preview(ctx, &name);
                 }
+                if browse_part_changed {
+                    if let Some(name) = self.browse_selected.clone() {
+                        self.load_browse_preview(ctx, &name);
+                    }
+                }
             }
             if apply_clicked && self.browse_open {
                 self.apply_browse_selection();
-            }
-        }
-
-        // Fields editor window
-        if self.fields_editor_open {
-            let modal = egui::Modal::new(egui::Id::new("fields_editor_modal")).show(ctx, |ui| {
-                ui.set_min_size(self.modal_size(ctx, egui::vec2(950.0, 460.0)));
-                ui.heading("Field Properties");
-                ui.separator();
-                if let Some(ref cat) = self.selected_category.clone() {
-                    let db_cols: Vec<String> = db::get_columns(self.conn(), cat)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|c| c != "id")
-                        .collect();
-                    if self.dbl.find_library(cat).is_none() {
-                        self.dbl.add_library(altium_dbl::create_library(cat));
-                    }
-                    let mut rows: Vec<altium_dbl::Field> = Vec::new();
-                    for col in &db_cols {
-                        match self
-                            .dbl
-                            .find_library(cat)
-                            .and_then(|l| l.fields.iter().find(|f| &f.column == col).cloned())
-                        {
-                            Some(f) => rows.push(f),
-                            None => rows.push(altium_dbl::Field {
-                                column: col.clone(),
-                                parameter: col.clone(),
-                                is_key: false,
-                                visible_on_add: true,
-                                add_mode: 0,
-                                remove_mode: 0,
-                                update_mode: 0,
-                            }),
-                        }
-                    }
-
-                    let mut changed = false;
-                    egui::ScrollArea::both()
-                        .id_salt("fields_editor_scroll")
-                        .show(ui, |ui| {
-                            egui::Grid::new("fields_editor_grid")
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    ui.label("Field");
-                                    ui.label("Design Parameter");
-                                    ui.label("Key");
-                                    ui.label("Visible on add");
-                                    ui.label("Update Values");
-                                    ui.label("Add To Design");
-                                    ui.label("Remove From Design");
-                                    ui.end_row();
-                                    for field in &rows {
-                                        let mut f = field.clone();
-                                        ui.label(&f.column);
-                                        let mut param = f.parameter.clone();
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut param)
-                                                .desired_width(170.0),
-                                        );
-                                        if param != f.parameter {
-                                            f.parameter = param;
-                                            changed = true;
-                                        }
-                                        ui.checkbox(&mut f.is_key, "");
-                                        ui.checkbox(&mut f.visible_on_add, "");
-                                        let mut upd = f.update_mode;
-                                        egui::ComboBox::from_id_salt(("fld_update", &f.column))
-                                            .selected_text(mode_label(&UPDATE_MODES, upd))
-                                            .width(130.0)
-                                            .show_ui(ui, |ui| {
-                                                for (val, label) in UPDATE_MODES {
-                                                    if ui
-                                                        .selectable_label(upd == val, label)
-                                                        .clicked()
-                                                    {
-                                                        upd = val;
-                                                    }
-                                                }
-                                            });
-                                        let mut add = f.add_mode;
-                                        egui::ComboBox::from_id_salt(("fld_add", &f.column))
-                                            .selected_text(mode_label(&ADD_MODES, add))
-                                            .width(210.0)
-                                            .show_ui(ui, |ui| {
-                                                for (val, label) in ADD_MODES {
-                                                    if ui
-                                                        .selectable_label(add == val, label)
-                                                        .clicked()
-                                                    {
-                                                        add = val;
-                                                    }
-                                                }
-                                            });
-                                        let mut rem = f.remove_mode;
-                                        egui::ComboBox::from_id_salt(("fld_remove", &f.column))
-                                            .selected_text(mode_label(&REMOVE_MODES, rem))
-                                            .width(200.0)
-                                            .show_ui(ui, |ui| {
-                                                for (val, label) in REMOVE_MODES {
-                                                    if ui
-                                                        .selectable_label(rem == val, label)
-                                                        .clicked()
-                                                    {
-                                                        rem = val;
-                                                    }
-                                                }
-                                            });
-                                        if upd != f.update_mode
-                                            || add != f.add_mode
-                                            || rem != f.remove_mode
-                                        {
-                                            f.update_mode = upd;
-                                            f.add_mode = add;
-                                            f.remove_mode = rem;
-                                            changed = true;
-                                        }
-                                        if f != *field {
-                                            if let Some(lib) = self.dbl.find_library_mut(cat) {
-                                                if let Some(existing) = lib
-                                                    .fields
-                                                    .iter_mut()
-                                                    .find(|x| x.column == f.column)
-                                                {
-                                                    *existing = f.clone();
-                                                } else {
-                                                    lib.fields.push(f.clone());
-                                                }
-                                            }
-                                            changed = true;
-                                        }
-                                        ui.end_row();
-                                    }
-                                });
-                        });
-                    if changed {
-                        self.save_dbl();
-                    }
-                } else {
-                    ui.label("Select a category first");
-                }
-            });
-            if modal.should_close() {
-                self.fields_editor_open = false;
             }
         }
     }

@@ -1,12 +1,13 @@
 [package]
 name = "AltiumDB"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
 rusqlite = { version = "0.32", features = ["bundled"] }
+postgres = "0.19"
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,7 +18,6 @@ calamine = "0.36.1"
 resvg = "0.44"
 usvg = "0.44"
 tiny-skia = "0.11"
-cfb = "0.14.0"
 
 [build-dependencies]
 winresource = "0.1"

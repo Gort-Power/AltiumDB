@@ -6,8 +6,36 @@ use image::GenericImageView;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-mod altium;
-mod altium_dbl;
+fn configure_unicode_fonts(ctx: &egui::Context) {
+    let candidates = [
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\seguisym.ttf",
+    ];
+    let mut fonts = egui::FontDefinitions::default();
+    let mut loaded = Vec::new();
+    for (index, path) in candidates.iter().enumerate() {
+        if let Ok(data) = std::fs::read(path) {
+            let name = format!("windows_unicode_{index}");
+            fonts
+                .font_data
+                .insert(name.clone(), egui::FontData::from_owned(data).into());
+            loaded.push(name);
+        }
+    }
+    if loaded.is_empty() {
+        return;
+    }
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(family_fonts) = fonts.families.get_mut(&family) {
+            for name in loaded.iter().rev() {
+                family_fonts.insert(0, name.clone());
+            }
+        }
+    }
+    ctx.set_fonts(fonts);
+}
+
 mod app;
 mod db;
 mod render;
@@ -18,7 +46,19 @@ struct ConfigData {
     #[serde(default)]
     db_path: String,
     #[serde(default)]
-    dbl_path: String,
+    database_type: String,
+    #[serde(default)]
+    dsn: String,
+    #[serde(default)]
+    pg_host: String,
+    #[serde(default)]
+    pg_port: String,
+    #[serde(default)]
+    pg_database: String,
+    #[serde(default)]
+    pg_user: String,
+    #[serde(default)]
+    pg_password: String,
 }
 
 fn load_icon() -> Option<egui::IconData> {
@@ -82,17 +122,7 @@ fn find_sqlite_up(start: &Path, max_depth: usize) -> Option<PathBuf> {
     None
 }
 
-fn config_dbl_path(config: &Path) -> Option<PathBuf> {
-    let data = std::fs::read_to_string(config).ok()?;
-    let cfg = serde_json::from_str::<ConfigData>(&data).ok()?;
-    if cfg.dbl_path.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(cfg.dbl_path))
-    }
-}
-
-fn resolve_paths() -> (PathBuf, PathBuf, PathBuf) {
+fn resolve_paths() -> (PathBuf, PathBuf, String, String) {
     let default_db = PathBuf::from("altiumdb.sqlite");
     let cwd = std::env::current_dir().unwrap_or_default();
     let exe_dir = std::env::current_exe()
@@ -103,8 +133,7 @@ fn resolve_paths() -> (PathBuf, PathBuf, PathBuf) {
     if let Some(arg) = std::env::args().nth(1) {
         let db = PathBuf::from(arg);
         let config = db.with_extension("config.json");
-        let dbl = config_dbl_path(&config).unwrap_or_else(|| altium_dbl::dbl_path_for_db(&db));
-        return (db, dbl, config);
+        return (db, config, "sqlite".to_string(), String::new());
     }
 
     if let Some(config) = find_file_up(&cwd, "altiumdb.config.json", 6)
@@ -125,12 +154,39 @@ fn resolve_paths() -> (PathBuf, PathBuf, PathBuf) {
                 } else {
                     PathBuf::from(cfg.db_path)
                 };
-                let dbl = if cfg.dbl_path.is_empty() {
-                    altium_dbl::dbl_path_for_db(&db)
-                } else {
-                    PathBuf::from(cfg.dbl_path)
-                };
-                return (db, dbl, config);
+                return (
+                    db,
+                    config,
+                    if cfg.database_type.is_empty() {
+                        "sqlite".to_string()
+                    } else {
+                        cfg.database_type
+                    },
+                    if cfg.pg_host.is_empty()
+                        && cfg.pg_port.is_empty()
+                        && cfg.pg_database.is_empty()
+                        && cfg.pg_user.is_empty()
+                        && cfg.pg_password.is_empty()
+                    {
+                        cfg.dsn
+                    } else {
+                        db::postgres_connection_string(
+                            if cfg.pg_host.is_empty() {
+                                "localhost"
+                            } else {
+                                &cfg.pg_host
+                            },
+                            if cfg.pg_port.is_empty() {
+                                "5432"
+                            } else {
+                                &cfg.pg_port
+                            },
+                            &cfg.pg_database,
+                            &cfg.pg_user,
+                            &cfg.pg_password,
+                        )
+                    },
+                );
             }
         }
     }
@@ -141,8 +197,7 @@ fn resolve_paths() -> (PathBuf, PathBuf, PathBuf) {
         .or_else(|| find_sqlite_up(&exe_dir, 6))
         .unwrap_or(default_db.clone());
     let config = PathBuf::from("altiumdb.config.json");
-    let dbl = config_dbl_path(&config).unwrap_or_else(|| altium_dbl::dbl_path_for_db(&db));
-    (db, dbl, config)
+    (db, config, "sqlite".to_string(), String::new())
 }
 
 fn main() -> eframe::Result<()> {
@@ -162,15 +217,17 @@ fn main() -> eframe::Result<()> {
         "AltiumDB",
         options,
         Box::new(|_cc| {
-            let (db_path, dbl_path, config_path) = resolve_paths();
-            let conn = db::open_database(&db_path).expect("Failed to open database");
+            configure_unicode_fonts(&_cc.egui_ctx);
+            let (db_path, config_path, database_type, dsn) = resolve_paths();
+            let connection_string = if database_type.eq_ignore_ascii_case("sqlite") {
+                db_path.display().to_string()
+            } else {
+                dsn
+            };
+            let conn = db::open_database_with_config(&database_type, &connection_string)
+                .expect("Failed to open database");
             db::migrate(&conn).expect("Failed to migrate database");
-            Ok(Box::new(app::AltiumDbApp::new(
-                conn,
-                db_path,
-                dbl_path,
-                config_path,
-            )))
+            Ok(Box::new(app::AltiumDbApp::new(conn, db_path, config_path)))
         }),
     )
 }
