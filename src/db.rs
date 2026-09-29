@@ -464,7 +464,7 @@ pub fn get_tables(c: &Connection) -> Result<Vec<String>> {
     } else {
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     };
-    Ok(query_strings(c, sql, &[])?)
+    query_strings(c, sql, &[])
 }
 pub fn get_columns(c: &Connection, t: &str) -> Result<Vec<String>> {
     if c.is_pg() {
@@ -663,7 +663,7 @@ pub fn get_distinct_values(c: &Connection, t: &str, col: &str) -> Result<Vec<Str
         qi(col),
         qi(col)
     );
-    Ok(query_strings(c, &sql, &[])?)
+    query_strings(c, &sql, &[])
 }
 pub fn search_components(
     c: &Connection,

@@ -18,6 +18,7 @@ Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+ChangesEnvironment=yes
 SetupIconFile=..\icon.ico
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppName}.exe
@@ -43,6 +44,15 @@ Filename: "{app}\{#AppName}.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; 
 const
   PythonDownloadUrl = 'https://www.python.org/downloads/windows/';
   AltiumMonkeyPackage = 'https://github.com/wavenumber-eng/altium_monkey/archive/refs/heads/main.zip';
+  MachineEnvironmentKey = 'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';
+  UserEnvironmentKey = 'Environment';
+
+function SetProcessEnvironmentVariable(const Name, Value: String): BOOL;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall setuponly';
+
+function ExpandEnvironmentStrings(const Source, Destination: String;
+  Size: DWORD): DWORD;
+  external 'ExpandEnvironmentStringsW@kernel32.dll stdcall setuponly';
 
 function RunHidden(const FileName, Parameters: String): Boolean;
 var
@@ -52,10 +62,82 @@ begin
     and (ExitCode = 0);
 end;
 
+function TryExpandEnvironment(const Value: String; var Expanded: String): Boolean;
+var
+  Buffer: String;
+  Written: DWORD;
+begin
+  Expanded := '';
+  Result := False;
+  if Value = '' then begin
+    Expanded := Value;
+    Result := True;
+    Exit;
+  end;
+
+  Buffer := StringOfChar(' ', 32768);
+  Written := ExpandEnvironmentStrings(Value, Buffer, Length(Buffer));
+  if (Written = 0) or (Written > Length(Buffer)) then
+    Exit;
+
+  SetLength(Buffer, Written - 1);
+  Expanded := Buffer;
+  Result := True;
+end;
+
+function ReadRegistryPath(const RootKey: Integer; const SubKeyName: String;
+  var PathValue: String): Boolean;
+var
+  RawPath: String;
+begin
+  PathValue := '';
+  Result := RegQueryStringValue(RootKey, SubKeyName, 'Path', RawPath);
+  if Result then
+    Result := TryExpandEnvironment(RawPath, PathValue);
+end;
+
+function AppendPath(const LeftPath, RightPath: String): String;
+begin
+  if LeftPath = '' then
+    Result := RightPath
+  else if RightPath = '' then
+    Result := LeftPath
+  else if LeftPath[Length(LeftPath)] = ';' then
+    Result := LeftPath + RightPath
+  else
+    Result := LeftPath + ';' + RightPath;
+end;
+
+function RefreshProcessPath: Boolean;
+var
+  MachinePath: String;
+  UserPath: String;
+  NewPath: String;
+begin
+  Result := False;
+  if not ReadRegistryPath(HKEY_LOCAL_MACHINE, MachineEnvironmentKey, MachinePath) then
+    MachinePath := '';
+  if not ReadRegistryPath(HKEY_CURRENT_USER, UserEnvironmentKey, UserPath) then
+    UserPath := '';
+
+  NewPath := AppendPath(MachinePath, UserPath);
+  if NewPath = '' then
+    NewPath := GetEnv('Path');
+  if NewPath = '' then
+    Exit;
+
+  Result := SetProcessEnvironmentVariable('Path', NewPath);
+end;
+
 function FindPython(var PythonExe: String): Boolean;
 begin
-  PythonExe := 'python';
+  RefreshProcessPath;
+  PythonExe := FileSearch('python.exe', GetEnv('Path'));
+  if PythonExe = '' then
+    PythonExe := 'python';
   Result := RunHidden(PythonExe, '-c "import sys; print(sys.version)"');
+  if not Result then
+    PythonExe := '';
 end;
 
 function PythonHasAltiumMonkey(const PythonExe: String): Boolean;

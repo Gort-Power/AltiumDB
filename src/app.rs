@@ -1595,9 +1595,9 @@ impl eframe::App for AltiumDbApp {
                         );
                     });
 
-                let row = (ui.cursor().min.x, ui.available_width());
-                ui.horizontal(|ui| {
-                    if self.settings_database_type == "sqlite" {
+                if self.settings_database_type == "sqlite" {
+                    let row = (ui.cursor().min.x, ui.available_width());
+                    ui.horizontal(|ui| {
                         ui.label("Database (.sqlite):");
                         if ui.button("Browse").clicked() {
                             if let Some(path) = rfd::FileDialog::new()
@@ -1613,8 +1613,8 @@ impl eframe::App for AltiumDbApp {
                                 .hint_text("Path to .sqlite file")
                                 .desired_width(w),
                         );
-                    }
-                });
+                    });
+                }
 
                 if self.settings_database_type != "sqlite" {
                     for (label, value, password) in [
@@ -1906,45 +1906,48 @@ impl eframe::App for AltiumDbApp {
                 let mut hovered_cat: Option<String> = None;
                 let mut to_search_cat = None;
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.mode == AppMode::Search {
-                        let all_selected = self.search_all && self.search_category.is_none();
-                        if ui.selectable_label(all_selected, ALL_CATEGORIES).clicked() {
-                            to_search_cat = Some(ALL_CATEGORIES.to_string());
-                        }
-                        for cat in &self.categories {
-                            let is_selected = self.search_category.as_deref() == Some(&cat.name);
-                            if ui.selectable_label(is_selected, &cat.name).clicked() {
-                                to_search_cat = Some(cat.name.clone());
+                egui::ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        if self.mode == AppMode::Search {
+                            let all_selected = self.search_all && self.search_category.is_none();
+                            if ui.selectable_label(all_selected, ALL_CATEGORIES).clicked() {
+                                to_search_cat = Some(ALL_CATEGORIES.to_string());
+                            }
+                            for cat in &self.categories {
+                                let is_selected =
+                                    self.search_category.as_deref() == Some(&cat.name);
+                                if ui.selectable_label(is_selected, &cat.name).clicked() {
+                                    to_search_cat = Some(cat.name.clone());
+                                }
+                            }
+                        } else {
+                            for cat in &self.categories {
+                                let is_selected = selected.as_deref() == Some(&cat.name);
+                                let response = ui.selectable_label(is_selected, &cat.name);
+                                if response.clicked() {
+                                    to_select = Some(cat.name.clone());
+                                }
+                                if response.hovered() {
+                                    hovered_cat = Some(cat.name.clone());
+                                }
+                                response.context_menu(|ui| {
+                                    if ui.button("Edit").clicked() {
+                                        to_edit = Some(cat.name.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Clone").clicked() {
+                                        to_clone_cat = Some(cat.name.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        to_delete = Some(cat.name.clone());
+                                        ui.close_menu();
+                                    }
+                                });
                             }
                         }
-                    } else {
-                        for cat in &self.categories {
-                            let is_selected = selected.as_deref() == Some(&cat.name);
-                            let response = ui.selectable_label(is_selected, &cat.name);
-                            if response.clicked() {
-                                to_select = Some(cat.name.clone());
-                            }
-                            if response.hovered() {
-                                hovered_cat = Some(cat.name.clone());
-                            }
-                            response.context_menu(|ui| {
-                                if ui.button("Edit").clicked() {
-                                    to_edit = Some(cat.name.clone());
-                                    ui.close_menu();
-                                }
-                                if ui.button("Clone").clicked() {
-                                    to_clone_cat = Some(cat.name.clone());
-                                    ui.close_menu();
-                                }
-                                if ui.button("Delete").clicked() {
-                                    to_delete = Some(cat.name.clone());
-                                    ui.close_menu();
-                                }
-                            });
-                        }
-                    }
-                });
+                    });
 
                 if hovered_cat.is_some() && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
                     to_delete = hovered_cat;
@@ -2030,67 +2033,75 @@ impl eframe::App for AltiumDbApp {
                         ui.separator();
 
                         let mut changed = false;
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for p in &mut self.search_params {
-                                if p.values.is_empty() {
-                                    continue;
-                                }
-                                let current = if p.selected.is_empty() {
-                                    "Any".to_string()
-                                } else if p.selected.len() == p.values.len() {
-                                    "(All)".to_string()
-                                } else {
-                                    p.selected.join(", ")
-                                };
-                                let active = !p.selected.is_empty();
-                                let highlight = if ui.visuals().dark_mode {
-                                    egui::Color32::from_rgba_unmultiplied(255, 196, 0, 55)
-                                } else {
-                                    egui::Color32::from_rgba_unmultiplied(255, 196, 0, 95)
-                                };
-                                let frame = if active {
-                                    egui::Frame::NONE
-                                        .fill(highlight)
-                                        .inner_margin(egui::Margin::symmetric(6, 4))
-                                        .corner_radius(egui::CornerRadius::from(4.0))
-                                } else {
-                                    egui::Frame::NONE
-                                };
-                                frame.show(ui, |ui| {
-                                    let mut sel = p.selected.clone();
-                                    if active {
-                                        ui.label(egui::RichText::new(&p.name).strong());
-                                    } else {
-                                        ui.label(&p.name);
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(ui, |ui| {
+                                for p in &mut self.search_params {
+                                    if p.values.is_empty() {
+                                        continue;
                                     }
-                                    egui::ComboBox::from_id_salt(("search_param", &p.column))
-                                        .width(ui.available_width())
-                                        .selected_text(&current)
-                                        .show_ui(ui, |ui| {
-                                            if ui.selectable_label(sel.is_empty(), "Any").clicked()
-                                            {
-                                                sel.clear();
-                                            }
-                                            ui.separator();
-                                            for v in &p.values {
-                                                let mut checked = sel.contains(v);
-                                                if ui.checkbox(&mut checked, v.as_str()).changed() {
-                                                    if checked {
-                                                        sel.push(v.clone());
-                                                    } else {
-                                                        sel.retain(|x| x != v);
+                                    let current = if p.selected.is_empty() {
+                                        "Any".to_string()
+                                    } else if p.selected.len() == p.values.len() {
+                                        "(All)".to_string()
+                                    } else {
+                                        p.selected.join(", ")
+                                    };
+                                    let active = !p.selected.is_empty();
+                                    let highlight = if ui.visuals().dark_mode {
+                                        egui::Color32::from_rgba_unmultiplied(255, 196, 0, 55)
+                                    } else {
+                                        egui::Color32::from_rgba_unmultiplied(255, 196, 0, 95)
+                                    };
+                                    let frame = if active {
+                                        egui::Frame::NONE
+                                            .fill(highlight)
+                                            .inner_margin(egui::Margin::symmetric(6, 4))
+                                            .corner_radius(egui::CornerRadius::from(4.0))
+                                    } else {
+                                        egui::Frame::NONE
+                                    };
+                                    frame.show(ui, |ui| {
+                                        let mut sel = p.selected.clone();
+                                        if active {
+                                            ui.label(egui::RichText::new(&p.name).strong());
+                                        } else {
+                                            ui.label(&p.name);
+                                        }
+                                        egui::ComboBox::from_id_salt(("search_param", &p.column))
+                                            .width(ui.available_width())
+                                            .wrap()
+                                            .selected_text(&current)
+                                            .show_ui(ui, |ui| {
+                                                if ui
+                                                    .selectable_label(sel.is_empty(), "Any")
+                                                    .clicked()
+                                                {
+                                                    sel.clear();
+                                                }
+                                                ui.separator();
+                                                for v in &p.values {
+                                                    let mut checked = sel.contains(v);
+                                                    if ui
+                                                        .checkbox(&mut checked, v.as_str())
+                                                        .changed()
+                                                    {
+                                                        if checked {
+                                                            sel.push(v.clone());
+                                                        } else {
+                                                            sel.retain(|x| x != v);
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        });
-                                    sel.retain(|v| p.values.contains(v));
-                                    if sel != p.selected {
-                                        p.selected = sel;
-                                        changed = true;
-                                    }
-                                });
-                            }
-                        });
+                                            });
+                                        sel.retain(|v| p.values.contains(v));
+                                        if sel != p.selected {
+                                            p.selected = sel;
+                                            changed = true;
+                                        }
+                                    });
+                                }
+                            });
                         if changed {
                             self.refresh_search();
                         }
@@ -2147,43 +2158,45 @@ impl eframe::App for AltiumDbApp {
                     let mut to_clone_comp = None;
                     let mut hovered_comp: Option<String> = None;
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (index, comp) in self.components.iter().enumerate() {
-                            ui.push_id(index, |ui| {
-                                let is_selected = selected_index == Some(index);
-                                let response = ui.selectable_label(is_selected, &comp.mpn);
-                                if response.clicked() {
-                                    to_select = Some(comp.id.clone());
-                                    to_select_index = Some(index);
-                                }
-                                if response.hovered() {
-                                    hovered_comp = Some(if comp.id.is_empty() {
-                                        comp.mpn.clone()
-                                    } else {
-                                        comp.id.clone()
-                                    });
-                                }
-                                response.context_menu(|ui| {
-                                    if ui.button("Edit").clicked() {
-                                        to_edit = Some(comp.clone());
-                                        ui.close_menu();
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            for (index, comp) in self.components.iter().enumerate() {
+                                ui.push_id(index, |ui| {
+                                    let is_selected = selected_index == Some(index);
+                                    let response = ui.selectable_label(is_selected, &comp.mpn);
+                                    if response.clicked() {
+                                        to_select = Some(comp.id.clone());
+                                        to_select_index = Some(index);
                                     }
-                                    if ui.button("Clone").clicked() {
-                                        to_clone_comp = Some(comp.clone());
-                                        ui.close_menu();
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        to_delete = Some(if comp.id.is_empty() {
+                                    if response.hovered() {
+                                        hovered_comp = Some(if comp.id.is_empty() {
                                             comp.mpn.clone()
                                         } else {
                                             comp.id.clone()
                                         });
-                                        ui.close_menu();
                                     }
+                                    response.context_menu(|ui| {
+                                        if ui.button("Edit").clicked() {
+                                            to_edit = Some(comp.clone());
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Clone").clicked() {
+                                            to_clone_comp = Some(comp.clone());
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Delete").clicked() {
+                                            to_delete = Some(if comp.id.is_empty() {
+                                                comp.mpn.clone()
+                                            } else {
+                                                comp.id.clone()
+                                            });
+                                            ui.close_menu();
+                                        }
+                                    });
                                 });
-                            });
-                        }
-                    });
+                            }
+                        });
 
                     if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
                         to_delete = hovered_comp.or_else(|| {
@@ -2370,6 +2383,7 @@ impl eframe::App for AltiumDbApp {
 
                             egui::ScrollArea::vertical()
                                 .id_salt("search_results_scroll")
+                                .auto_shrink(false)
                                 .show(ui, |ui| {
                                     for (cat, comp) in &self.search_results {
                                         let select_key = format!("{}|{}", cat, comp.id);
@@ -2451,600 +2465,658 @@ impl eframe::App for AltiumDbApp {
                     });
                 }
             } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if let Some(ref cat) = self.selected_category.clone() {
-                        if let Some(comp_id) = self.selected_component_id.clone() {
-                            ui.horizontal(|ui| {
-                                ui.heading("Base Fields");
-                            });
-                            ui.separator();
+                egui::ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        if let Some(ref cat) = self.selected_category.clone() {
+                            if let Some(comp_id) = self.selected_component_id.clone() {
+                                ui.horizontal(|ui| {
+                                    ui.heading("Base Fields");
+                                });
+                                ui.separator();
 
-                            let mut save_component = false;
+                                let mut save_component = false;
 
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("MPN:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.mpn_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Manufacturer:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.manufacturer_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Library Ref:");
-                                let extra = button_width(ui, "Browse")
-                                    + button_width(ui, "View")
-                                    + 2.0 * ui.spacing().item_spacing.x;
-                                let w = stretch_width(ui, row, extra);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.library_ref_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                                if ui.button("Browse").clicked() {
-                                    self.pick_symbol_lib(ctx);
-                                }
-                                if ui.button("View").clicked() && !self.library_ref_input.is_empty()
-                                {
-                                    let name = self.library_ref_input.trim().to_string();
-                                    let folder = self.settings_symbols_folder.clone();
-                                    let rel = self.library_path_input.trim().to_string();
-                                    self.render_and_show(ctx, folder, rel, true, &name);
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Library Path:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.library_path_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Ref:");
-                                let extra = button_width(ui, "Browse")
-                                    + button_width(ui, "View")
-                                    + 2.0 * ui.spacing().item_spacing.x;
-                                let w = stretch_width(ui, row, extra);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_ref_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                                if ui.button("Browse").clicked() {
-                                    self.open_browse(ctx, BrowseTarget::Footprint1);
-                                }
-                                if ui.button("View").clicked()
-                                    && !self.footprint_ref_input.is_empty()
-                                {
-                                    let name = self.footprint_ref_input.trim().to_string();
-                                    let folder = self.settings_footprints_folder.clone();
-                                    let rel = self.footprint_path_input.trim().to_string();
-                                    self.render_and_show(ctx, folder, rel, false, &name);
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Path:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_path_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Ref 2:");
-                                let extra = button_width(ui, "Browse")
-                                    + button_width(ui, "View")
-                                    + 2.0 * ui.spacing().item_spacing.x;
-                                let w = stretch_width(ui, row, extra);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_ref2_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                                if ui.button("Browse").clicked() {
-                                    self.open_browse(ctx, BrowseTarget::Footprint2);
-                                }
-                                if ui.button("View").clicked()
-                                    && !self.footprint_ref2_input.is_empty()
-                                {
-                                    let name = self.footprint_ref2_input.trim().to_string();
-                                    let folder = self.settings_footprints_folder.clone();
-                                    let rel = self.footprint_path2_input.trim().to_string();
-                                    self.render_and_show(ctx, folder, rel, false, &name);
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Path 2:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_path2_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Ref 3:");
-                                let extra = button_width(ui, "Browse")
-                                    + button_width(ui, "View")
-                                    + 2.0 * ui.spacing().item_spacing.x;
-                                let w = stretch_width(ui, row, extra);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_ref3_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                                if ui.button("Browse").clicked() {
-                                    self.open_browse(ctx, BrowseTarget::Footprint3);
-                                }
-                                if ui.button("View").clicked()
-                                    && !self.footprint_ref3_input.is_empty()
-                                {
-                                    let name = self.footprint_ref3_input.trim().to_string();
-                                    let folder = self.settings_footprints_folder.clone();
-                                    let rel = self.footprint_path3_input.trim().to_string();
-                                    self.render_and_show(ctx, folder, rel, false, &name);
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Footprint Path 3:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.footprint_path3_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink1Description:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(
-                                        &mut self.component_link1_description_input,
-                                    )
-                                    .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink1URL:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.component_link1_url_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink2Description:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(
-                                        &mut self.component_link2_description_input,
-                                    )
-                                    .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink2URL:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.component_link2_url_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink3Description:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(
-                                        &mut self.component_link3_description_input,
-                                    )
-                                    .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("ComponentLink3URL:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.component_link3_url_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Description:");
-                                let w = stretch_width(ui, row, 0.0);
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.description_input)
-                                        .desired_width(w),
-                                );
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    save_component = true;
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.verified_input, "Verified");
-                            });
-
-                            ui.separator();
-                            ui.heading("Custom Fields");
-                            ui.separator();
-
-                            let row = (ui.cursor().min.x, ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label("Field name:");
-                                let btn_text = if self.editing_field.is_some() {
-                                    "Save"
-                                } else {
-                                    "+"
-                                };
-                                let w = stretch_width(
-                                    ui,
-                                    row,
-                                    button_width(ui, btn_text) + ui.spacing().item_spacing.x,
-                                );
-                                let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.field_col_input)
-                                        .desired_width(w),
-                                );
-                                let mut do_action = ui.button(btn_text).clicked();
-                                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    do_action = true;
-                                }
-                                if do_action {
-                                    let field_name = self.field_col_input.trim().to_string();
-                                    if !field_name.is_empty() {
-                                        if let Some(ref old_col) = self.editing_field.clone() {
-                                            if old_col != &field_name {
-                                                db::rename_column(
-                                                    self.conn(),
-                                                    cat,
-                                                    old_col,
-                                                    &field_name,
-                                                )
-                                                .ok();
-                                            }
-                                        } else {
-                                            db::add_column(self.conn(), cat, &field_name).ok();
-                                        }
-                                        self.refresh_components();
-                                        self.refresh_custom_values();
-                                        self.field_col_input.clear();
-                                        self.editing_field = None;
-                                        self.set_status_ok();
-                                    }
-                                }
-                            });
-
-                            ui.separator();
-
-                            let mut values = self.custom_values.clone();
-                            let mut changed = None;
-                            let mut save_custom_values = false;
-                            let mut to_delete_field = None;
-                            let mut to_edit_field = None;
-                            let mut hovered_field: Option<String> = None;
-
-                            for (i, (col, val)) in values.iter_mut().enumerate() {
-                                let display = col.clone();
-
-                                let mut buf = val.clone();
                                 let row = (ui.cursor().min.x, ui.available_width());
-                                let text_response = ui
-                                    .horizontal(|ui| {
-                                        ui.label(format!("{}:", display));
-                                        let w = stretch_width(ui, row, 0.0);
-                                        let r = ui.add(
-                                            egui::TextEdit::singleline(&mut buf).desired_width(w),
-                                        );
-                                        if r.changed() {
-                                            changed = Some((i, buf.clone(), r.lost_focus()));
-                                        }
-                                        r
-                                    })
-                                    .inner;
-
-                                if text_response.hovered() {
-                                    hovered_field = Some(col.clone());
-                                }
-
-                                text_response.context_menu(|ui| {
-                                    if ui.button("Edit").clicked() {
-                                        to_edit_field = Some((col.clone(), display.clone()));
-                                        ui.close_menu();
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        to_delete_field = Some(col.clone());
-                                        ui.close_menu();
+                                ui.horizontal(|ui| {
+                                    ui.label("MPN:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.mpn_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
                                     }
                                 });
-                            }
-
-                            ui.horizontal(|ui| {
-                                if ui.button("Save").clicked()
-                                    || ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S))
-                                {
-                                    save_component = true;
-                                    save_custom_values = true;
-                                }
-                                if ui.small_button("Clear").clicked() {
-                                    self.mpn_input.clear();
-                                    self.manufacturer_input.clear();
-                                    self.verified_input = false;
-                                    self.library_ref_input.clear();
-                                    self.footprint_ref_input.clear();
-                                    self.library_path_input.clear();
-                                    self.footprint_path_input.clear();
-                                    self.footprint_ref2_input.clear();
-                                    self.footprint_path2_input.clear();
-                                    self.footprint_ref3_input.clear();
-                                    self.footprint_path3_input.clear();
-                                    self.description_input.clear();
-                                    self.component_link1_description_input.clear();
-                                    self.component_link1_url_input.clear();
-                                    self.component_link2_description_input.clear();
-                                    self.component_link2_url_input.clear();
-                                    self.component_link3_description_input.clear();
-                                    self.component_link3_url_input.clear();
-                                    for (_, val) in &mut self.custom_values {
-                                        val.clear();
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Manufacturer:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.manufacturer_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
                                     }
-                                }
-                            });
-
-                            if save_component {
-                                let mpn = self.mpn_input.trim().to_string();
-                                let manufacturer = self.manufacturer_input.trim().to_string();
-                                let verified = self.verified_input;
-                                let library_ref = self.library_ref_input.trim().to_string();
-                                let footprint_ref = self.footprint_ref_input.trim().to_string();
-                                let library_path = self.library_path_input.trim().to_string();
-                                let footprint_path = self.footprint_path_input.trim().to_string();
-                                let footprint_ref2 = self.footprint_ref2_input.trim().to_string();
-                                let footprint_path2 = self.footprint_path2_input.trim().to_string();
-                                let footprint_ref3 = self.footprint_ref3_input.trim().to_string();
-                                let footprint_path3 = self.footprint_path3_input.trim().to_string();
-                                let description = self.description_input.trim().to_string();
-                                let component_link1_description =
-                                    self.component_link1_description_input.trim().to_string();
-                                let component_link1_url =
-                                    self.component_link1_url_input.trim().to_string();
-                                let component_link2_description =
-                                    self.component_link2_description_input.trim().to_string();
-                                let component_link2_url =
-                                    self.component_link2_url_input.trim().to_string();
-                                let component_link3_description =
-                                    self.component_link3_description_input.trim().to_string();
-                                let component_link3_url =
-                                    self.component_link3_url_input.trim().to_string();
-                                let save_result =
-                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                        db::update_component(
-                                            self.conn(),
-                                            cat,
-                                            &db::Component {
-                                                id: comp_id.clone(),
-                                                mpn,
-                                                manufacturer,
-                                                verified,
-                                                library_ref,
-                                                footprint_ref,
-                                                description,
-                                                component_link1_description,
-                                                component_link1_url,
-                                                component_link2_description,
-                                                component_link2_url,
-                                                component_link3_description,
-                                                component_link3_url,
-                                                library_path,
-                                                footprint_path,
-                                                footprint_ref2,
-                                                footprint_path2,
-                                                footprint_ref3,
-                                                footprint_path3,
-                                            },
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Library Ref:");
+                                    let extra = button_width(ui, "Browse")
+                                        + button_width(ui, "View")
+                                        + 2.0 * ui.spacing().item_spacing.x;
+                                    let w = stretch_width(ui, row, extra);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.library_ref_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                    if ui.button("Browse").clicked() {
+                                        self.pick_symbol_lib(ctx);
+                                    }
+                                    if ui.button("View").clicked()
+                                        && !self.library_ref_input.is_empty()
+                                    {
+                                        let name = self.library_ref_input.trim().to_string();
+                                        let folder = self.settings_symbols_folder.clone();
+                                        let rel = self.library_path_input.trim().to_string();
+                                        self.render_and_show(ctx, folder, rel, true, &name);
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Library Path:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.library_path_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Ref:");
+                                    let extra = button_width(ui, "Browse")
+                                        + button_width(ui, "View")
+                                        + 2.0 * ui.spacing().item_spacing.x;
+                                    let w = stretch_width(ui, row, extra);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_ref_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                    if ui.button("Browse").clicked() {
+                                        self.open_browse(ctx, BrowseTarget::Footprint1);
+                                    }
+                                    if ui.button("View").clicked()
+                                        && !self.footprint_ref_input.is_empty()
+                                    {
+                                        let name = self.footprint_ref_input.trim().to_string();
+                                        let folder = self.settings_footprints_folder.clone();
+                                        let rel = self.footprint_path_input.trim().to_string();
+                                        self.render_and_show(ctx, folder, rel, false, &name);
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Path:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_path_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Ref 2:");
+                                    let extra = button_width(ui, "Browse")
+                                        + button_width(ui, "View")
+                                        + 2.0 * ui.spacing().item_spacing.x;
+                                    let w = stretch_width(ui, row, extra);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_ref2_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                    if ui.button("Browse").clicked() {
+                                        self.open_browse(ctx, BrowseTarget::Footprint2);
+                                    }
+                                    if ui.button("View").clicked()
+                                        && !self.footprint_ref2_input.is_empty()
+                                    {
+                                        let name = self.footprint_ref2_input.trim().to_string();
+                                        let folder = self.settings_footprints_folder.clone();
+                                        let rel = self.footprint_path2_input.trim().to_string();
+                                        self.render_and_show(ctx, folder, rel, false, &name);
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Path 2:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_path2_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Ref 3:");
+                                    let extra = button_width(ui, "Browse")
+                                        + button_width(ui, "View")
+                                        + 2.0 * ui.spacing().item_spacing.x;
+                                    let w = stretch_width(ui, row, extra);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_ref3_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                    if ui.button("Browse").clicked() {
+                                        self.open_browse(ctx, BrowseTarget::Footprint3);
+                                    }
+                                    if ui.button("View").clicked()
+                                        && !self.footprint_ref3_input.is_empty()
+                                    {
+                                        let name = self.footprint_ref3_input.trim().to_string();
+                                        let folder = self.settings_footprints_folder.clone();
+                                        let rel = self.footprint_path3_input.trim().to_string();
+                                        self.render_and_show(ctx, folder, rel, false, &name);
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Footprint Path 3:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.footprint_path3_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink1Description:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link1_description_input,
                                         )
-                                    }));
-                                match save_result {
-                                    Ok(Ok(())) => {
-                                        if let Some(index) = self.selected_component_index {
-                                            if let Some(component) = self.components.get_mut(index)
-                                            {
-                                                component.mpn = self.mpn_input.clone();
-                                                component.manufacturer =
-                                                    self.manufacturer_input.clone();
-                                                component.verified = self.verified_input;
-                                                component.library_ref =
-                                                    self.library_ref_input.clone();
-                                                component.library_path =
-                                                    self.library_path_input.clone();
-                                                component.footprint_ref =
-                                                    self.footprint_ref_input.clone();
-                                                component.footprint_path =
-                                                    self.footprint_path_input.clone();
-                                                component.footprint_ref2 =
-                                                    self.footprint_ref2_input.clone();
-                                                component.footprint_path2 =
-                                                    self.footprint_path2_input.clone();
-                                                component.footprint_ref3 =
-                                                    self.footprint_ref3_input.clone();
-                                                component.footprint_path3 =
-                                                    self.footprint_path3_input.clone();
-                                                component.description =
-                                                    self.description_input.clone();
-                                                component.component_link1_description =
-                                                    self.component_link1_description_input.clone();
-                                                component.component_link1_url =
-                                                    self.component_link1_url_input.clone();
-                                                component.component_link2_description =
-                                                    self.component_link2_description_input.clone();
-                                                component.component_link2_url =
-                                                    self.component_link2_url_input.clone();
-                                                component.component_link3_description =
-                                                    self.component_link3_description_input.clone();
-                                                component.component_link3_url =
-                                                    self.component_link3_url_input.clone();
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink1URL:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link1_url_input,
+                                        )
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink2Description:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link2_description_input,
+                                        )
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink2URL:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link2_url_input,
+                                        )
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink3Description:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link3_description_input,
+                                        )
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("ComponentLink3URL:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.component_link3_url_input,
+                                        )
+                                        .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Description:");
+                                    let w = stretch_width(ui, row, 0.0);
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.description_input)
+                                            .desired_width(w),
+                                    );
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        save_component = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.verified_input, "Verified");
+                                });
+
+                                ui.separator();
+                                ui.heading("Custom Fields");
+                                ui.separator();
+
+                                let row = (ui.cursor().min.x, ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label("Field name:");
+                                    let btn_text = if self.editing_field.is_some() {
+                                        "Save"
+                                    } else {
+                                        "+"
+                                    };
+                                    let w = stretch_width(
+                                        ui,
+                                        row,
+                                        button_width(ui, btn_text) + ui.spacing().item_spacing.x,
+                                    );
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.field_col_input)
+                                            .desired_width(w),
+                                    );
+                                    let mut do_action = ui.button(btn_text).clicked();
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        do_action = true;
+                                    }
+                                    if do_action {
+                                        let field_name = self.field_col_input.trim().to_string();
+                                        if !field_name.is_empty() {
+                                            if let Some(ref old_col) = self.editing_field.clone() {
+                                                if old_col != &field_name {
+                                                    db::rename_column(
+                                                        self.conn(),
+                                                        cat,
+                                                        old_col,
+                                                        &field_name,
+                                                    )
+                                                    .ok();
+                                                }
+                                            } else {
+                                                db::add_column(self.conn(), cat, &field_name).ok();
                                             }
+                                            self.refresh_components();
+                                            self.refresh_custom_values();
+                                            self.field_col_input.clear();
+                                            self.editing_field = None;
+                                            self.set_status_ok();
                                         }
-                                        self.set_status_ok();
                                     }
-                                    Ok(Err(e)) => {
-                                        self.set_status_err(format!(
-                                            "Failed to save component: {}",
-                                            e
-                                        ));
+                                });
+
+                                ui.separator();
+
+                                let mut values = self.custom_values.clone();
+                                let mut changed = None;
+                                let mut save_custom_values = false;
+                                let mut to_delete_field = None;
+                                let mut to_edit_field = None;
+                                let mut hovered_field: Option<String> = None;
+
+                                for (i, (col, val)) in values.iter_mut().enumerate() {
+                                    let display = col.clone();
+
+                                    let mut buf = val.clone();
+                                    let row = (ui.cursor().min.x, ui.available_width());
+                                    let text_response = ui
+                                        .horizontal(|ui| {
+                                            ui.label(format!("{}:", display));
+                                            let w = stretch_width(ui, row, 0.0);
+                                            let r = ui.add(
+                                                egui::TextEdit::singleline(&mut buf)
+                                                    .desired_width(w),
+                                            );
+                                            if r.changed() {
+                                                changed = Some((i, buf.clone(), r.lost_focus()));
+                                            }
+                                            r
+                                        })
+                                        .inner;
+
+                                    if text_response.hovered() {
+                                        hovered_field = Some(col.clone());
                                     }
-                                    Err(_) => {
-                                        self.set_status_err(
+
+                                    text_response.context_menu(|ui| {
+                                        if ui.button("Edit").clicked() {
+                                            to_edit_field = Some((col.clone(), display.clone()));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Delete").clicked() {
+                                            to_delete_field = Some(col.clone());
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
+
+                                ui.horizontal(|ui| {
+                                    if ui.button("Save").clicked()
+                                        || ui.input(|i| {
+                                            i.modifiers.ctrl && i.key_pressed(egui::Key::S)
+                                        })
+                                    {
+                                        save_component = true;
+                                        save_custom_values = true;
+                                    }
+                                    if ui.small_button("Clear").clicked() {
+                                        self.mpn_input.clear();
+                                        self.manufacturer_input.clear();
+                                        self.verified_input = false;
+                                        self.library_ref_input.clear();
+                                        self.footprint_ref_input.clear();
+                                        self.library_path_input.clear();
+                                        self.footprint_path_input.clear();
+                                        self.footprint_ref2_input.clear();
+                                        self.footprint_path2_input.clear();
+                                        self.footprint_ref3_input.clear();
+                                        self.footprint_path3_input.clear();
+                                        self.description_input.clear();
+                                        self.component_link1_description_input.clear();
+                                        self.component_link1_url_input.clear();
+                                        self.component_link2_description_input.clear();
+                                        self.component_link2_url_input.clear();
+                                        self.component_link3_description_input.clear();
+                                        self.component_link3_url_input.clear();
+                                        for (_, val) in &mut self.custom_values {
+                                            val.clear();
+                                        }
+                                    }
+                                });
+
+                                if save_component {
+                                    let mpn = self.mpn_input.trim().to_string();
+                                    let manufacturer = self.manufacturer_input.trim().to_string();
+                                    let verified = self.verified_input;
+                                    let library_ref = self.library_ref_input.trim().to_string();
+                                    let footprint_ref = self.footprint_ref_input.trim().to_string();
+                                    let library_path = self.library_path_input.trim().to_string();
+                                    let footprint_path =
+                                        self.footprint_path_input.trim().to_string();
+                                    let footprint_ref2 =
+                                        self.footprint_ref2_input.trim().to_string();
+                                    let footprint_path2 =
+                                        self.footprint_path2_input.trim().to_string();
+                                    let footprint_ref3 =
+                                        self.footprint_ref3_input.trim().to_string();
+                                    let footprint_path3 =
+                                        self.footprint_path3_input.trim().to_string();
+                                    let description = self.description_input.trim().to_string();
+                                    let component_link1_description =
+                                        self.component_link1_description_input.trim().to_string();
+                                    let component_link1_url =
+                                        self.component_link1_url_input.trim().to_string();
+                                    let component_link2_description =
+                                        self.component_link2_description_input.trim().to_string();
+                                    let component_link2_url =
+                                        self.component_link2_url_input.trim().to_string();
+                                    let component_link3_description =
+                                        self.component_link3_description_input.trim().to_string();
+                                    let component_link3_url =
+                                        self.component_link3_url_input.trim().to_string();
+                                    let save_result = std::panic::catch_unwind(
+                                        std::panic::AssertUnwindSafe(|| {
+                                            db::update_component(
+                                                self.conn(),
+                                                cat,
+                                                &db::Component {
+                                                    id: comp_id.clone(),
+                                                    mpn,
+                                                    manufacturer,
+                                                    verified,
+                                                    library_ref,
+                                                    footprint_ref,
+                                                    description,
+                                                    component_link1_description,
+                                                    component_link1_url,
+                                                    component_link2_description,
+                                                    component_link2_url,
+                                                    component_link3_description,
+                                                    component_link3_url,
+                                                    library_path,
+                                                    footprint_path,
+                                                    footprint_ref2,
+                                                    footprint_path2,
+                                                    footprint_ref3,
+                                                    footprint_path3,
+                                                },
+                                            )
+                                        }),
+                                    );
+                                    match save_result {
+                                        Ok(Ok(())) => {
+                                            if let Some(index) = self.selected_component_index {
+                                                if let Some(component) =
+                                                    self.components.get_mut(index)
+                                                {
+                                                    component.mpn = self.mpn_input.clone();
+                                                    component.manufacturer =
+                                                        self.manufacturer_input.clone();
+                                                    component.verified = self.verified_input;
+                                                    component.library_ref =
+                                                        self.library_ref_input.clone();
+                                                    component.library_path =
+                                                        self.library_path_input.clone();
+                                                    component.footprint_ref =
+                                                        self.footprint_ref_input.clone();
+                                                    component.footprint_path =
+                                                        self.footprint_path_input.clone();
+                                                    component.footprint_ref2 =
+                                                        self.footprint_ref2_input.clone();
+                                                    component.footprint_path2 =
+                                                        self.footprint_path2_input.clone();
+                                                    component.footprint_ref3 =
+                                                        self.footprint_ref3_input.clone();
+                                                    component.footprint_path3 =
+                                                        self.footprint_path3_input.clone();
+                                                    component.description =
+                                                        self.description_input.clone();
+                                                    component.component_link1_description = self
+                                                        .component_link1_description_input
+                                                        .clone();
+                                                    component.component_link1_url =
+                                                        self.component_link1_url_input.clone();
+                                                    component.component_link2_description = self
+                                                        .component_link2_description_input
+                                                        .clone();
+                                                    component.component_link2_url =
+                                                        self.component_link2_url_input.clone();
+                                                    component.component_link3_description = self
+                                                        .component_link3_description_input
+                                                        .clone();
+                                                    component.component_link3_url =
+                                                        self.component_link3_url_input.clone();
+                                                }
+                                            }
+                                            self.set_status_ok();
+                                        }
+                                        Ok(Err(e)) => {
+                                            self.set_status_err(format!(
+                                                "Failed to save component: {}",
+                                                e
+                                            ));
+                                        }
+                                        Err(_) => {
+                                            self.set_status_err(
                                             "Failed to save component: database operation panicked",
                                         );
+                                        }
                                     }
                                 }
-                            }
 
-                            if hovered_field.is_some()
-                                && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete))
-                            {
-                                to_delete_field = hovered_field;
-                            }
-
-                            if let Some((i, new_val, should_save)) = changed {
-                                self.custom_values[i].1 = new_val.clone();
-                                if let Some((_, value)) = values.get_mut(i) {
-                                    *value = new_val.clone();
+                                if hovered_field.is_some()
+                                    && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete))
+                                {
+                                    to_delete_field = hovered_field;
                                 }
-                                if should_save {
-                                    if let Some((col, _)) = values.get(i) {
-                                        let col_clone = col.clone();
-                                        let save_result = db::set_custom_value(
+
+                                if let Some((i, new_val, should_save)) = changed {
+                                    self.custom_values[i].1 = new_val.clone();
+                                    if let Some((_, value)) = values.get_mut(i) {
+                                        *value = new_val.clone();
+                                    }
+                                    if should_save {
+                                        if let Some((col, _)) = values.get(i) {
+                                            let col_clone = col.clone();
+                                            let save_result = db::set_custom_value(
+                                                self.conn(),
+                                                cat,
+                                                &comp_id,
+                                                &col_clone,
+                                                &new_val,
+                                            );
+                                            match save_result {
+                                                Ok(()) => {
+                                                    self.set_status_ok();
+                                                }
+                                                Err(e) => {
+                                                    self.set_status_err(format!(
+                                                        "Failed to save field '{}': {}",
+                                                        col_clone, e
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if save_custom_values {
+                                    let custom_values = self.custom_values.clone();
+                                    for (col, value) in custom_values {
+                                        match db::set_custom_value(
                                             self.conn(),
                                             cat,
                                             &comp_id,
-                                            &col_clone,
-                                            &new_val,
-                                        );
-                                        match save_result {
-                                            Ok(()) => {
-                                                self.set_status_ok();
-                                            }
+                                            &col,
+                                            &value,
+                                        ) {
+                                            Ok(()) => {}
                                             Err(e) => {
                                                 self.set_status_err(format!(
                                                     "Failed to save field '{}': {}",
-                                                    col_clone, e
+                                                    col, e
                                                 ));
+                                                break;
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            if save_custom_values {
-                                let custom_values = self.custom_values.clone();
-                                for (col, value) in custom_values {
-                                    match db::set_custom_value(
-                                        self.conn(),
-                                        cat,
-                                        &comp_id,
-                                        &col,
-                                        &value,
-                                    ) {
-                                        Ok(()) => {}
-                                        Err(e) => {
-                                            self.set_status_err(format!(
-                                                "Failed to save field '{}': {}",
-                                                col, e
-                                            ));
-                                            break;
-                                        }
-                                    }
+                                if let Some((col, _display)) = to_edit_field {
+                                    self.field_col_input = col.clone();
+                                    self.editing_field = Some(col);
                                 }
-                            }
 
-                            if let Some((col, _display)) = to_edit_field {
-                                self.field_col_input = col.clone();
-                                self.editing_field = Some(col);
-                            }
-
-                            if let Some(col) = to_delete_field {
-                                self.pending_delete = Some(DeleteRequest::Field {
-                                    category: cat.clone(),
-                                    column: col,
+                                if let Some(col) = to_delete_field {
+                                    self.pending_delete = Some(DeleteRequest::Field {
+                                        category: cat.clone(),
+                                        column: col,
+                                    });
+                                }
+                            } else {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label("Select a component to edit its fields");
                                 });
                             }
                         } else {
                             ui.centered_and_justified(|ui| {
-                                ui.label("Select a component to edit its fields");
+                                ui.label("Select a category to get started");
                             });
                         }
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("Select a category to get started");
-                        });
-                    }
-                });
+                    });
             }
         });
 
@@ -3255,6 +3327,7 @@ impl eframe::App for AltiumDbApp {
                     .show_inside(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("browse_entries_scroll")
+                            .auto_shrink(false)
                             .show(ui, |ui| {
                                 for (name, is_dir) in &entries {
                                     let display = if *is_dir {
